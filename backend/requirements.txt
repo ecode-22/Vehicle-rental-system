@@ -1,0 +1,7 @@
+django>=5.0
+djangorestframework
+djangorestframework-simplejwt
+django-cors-headers
+dj-database-url>=2.2
+psycopg[binary]>=3.2
+python-dotenv>=1.0

@@ -1,8 +1,8 @@
 # Anay Notes will be inserted heare
 
 ## Framworks
-- Next.js
-- 
+- Django + Django REST Framework(Backend)
+- React (Vite) (Frontend)
 
 ## Database
 - Supabase(Cloud Database)
@@ -10,3 +10,4 @@
 
 ## Desighn
 - Cars+ Bakkies+ Mottorsycle+ 
+
