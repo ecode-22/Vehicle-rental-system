@@ -76,35 +76,28 @@ Node.js or Django.
 
 Two roles: **customer** (browse & book cars) and **renter** (list cars, approve/reject bookings, dashboard).
 
-## 1. Backend (terminal 1)
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py seed            # optional demo data
-python manage.py runserver       # http://127.0.0.1:8000
-```
-Demo logins after `seed`: `renter1` and `customer1`, password `demo12345`.
-Admin panel: `python manage.py createsuperuser`, then open `/admin/`.
 
-## 2. Frontend (terminal 2)
-```bash
-cd frontend
-npm install
-npm run dev                      # http://localhost:5173
-```
-Backend URL defaults to `http://127.0.0.1:8000/api`. To change it, copy `.env.example` to `.env`.
+### Connect Django to Supabase PostgreSQL
 
-## API summary
-| Endpoint | Purpose |
-|---|---|
-| POST /api/auth/register/ , /login/ , /refresh/ ; GET /me/ | Auth (JWT) |
-| GET /api/cars/ (?search, max_price, transmission, fuel) | Browse cars |
-| POST/PATCH/DELETE /api/cars/ , GET /api/cars/mine/ | Renter fleet management |
-| POST /api/bookings/ ; /{id}/confirm, reject, cancel | Booking flow |
-| GET /api/dashboard/ | Role-specific stats |
+The project is configured to use PostgreSQL when `DATABASE_URL` is set in `backend/.env`; otherwise it uses the local SQLite database. The Supabase project URL and publishable key are not PostgreSQL credentials and should not be used as `DATABASE_URL`.
 
-## Before going live
-Set `DEBUG=False`, a real `SECRET_KEY`, restrict `CORS_ALLOW_ALL_ORIGINS`, and switch SQLite to PostgreSQL.
+1. Since the database password was added to this README, reset it in Supabase before connecting. Do not commit or share the replacement password.
+2. In the Supabase dashboard, open the project and choose **Connect**. Copy a PostgreSQL connection URI (use the Session Pooler if a direct database connection is not available on your network).
+3. In a terminal, create the local environment file:
+	```bash
+	cd backend
+	cp .env.example .env
+	```
+4. Edit `backend/.env` and set `DATABASE_URL` to the PostgreSQL URI from Supabase. Replace its password placeholder with the newly reset password. Keep this file private; it is excluded by `.gitignore`.
+5. From `backend/`, activate the virtual environment and apply the schema:
+	```bash
+	source .venv/bin/activate
+	pip install -r requirements.txt
+	python manage.py migrate
+	python manage.py seed
+	python manage.py runserver
+	```
+
+`migrate` creates the tables in Supabase. `seed` optionally inserts demo users and cars; it does not copy existing data from SQLite. The Supabase connection URI is only used by Django on the backend, so do not put it in the frontend environment or browser code.
+
+Renter car photos are saved under `backend/media/cars/` during local development. For deployment, configure persistent object storage (for example, a Supabase Storage bucket); local filesystem uploads can be lost when a hosted server is rebuilt.

@@ -13,6 +13,7 @@ class Car(models.Model):
     fuel = models.CharField(max_length=10, choices=[("petrol", "Petrol"), ("diesel", "Diesel"), ("electric", "Electric"), ("hybrid", "Hybrid")], default="petrol")
     location = models.CharField(max_length=100, blank=True)
     image_url = models.URLField(blank=True)
+    image = models.ImageField(upload_to="cars/", blank=True, null=True)
     description = models.TextField(blank=True)
     available = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

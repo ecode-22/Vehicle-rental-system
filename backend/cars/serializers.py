@@ -11,6 +11,11 @@ class CarSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ["owner", "created_at"]
 
+    def validate_image(self, value):
+        if value and value.size > 8 * 1024 * 1024:
+            raise serializers.ValidationError("Car images must be 8 MB or smaller.")
+        return value
+
 
 class BookingSerializer(serializers.ModelSerializer):
     car_detail = CarSerializer(source="car", read_only=True)
