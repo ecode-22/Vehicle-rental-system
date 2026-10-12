@@ -101,3 +101,13 @@ The project is configured to use PostgreSQL when `DATABASE_URL` is set in `backe
 `migrate` creates the tables in Supabase. `seed` optionally inserts demo users and cars; it does not copy existing data from SQLite. The Supabase connection URI is only used by Django on the backend, so do not put it in the frontend environment or browser code.
 
 Renter car photos are saved under `backend/media/cars/` during local development. For deployment, configure persistent object storage (for example, a Supabase Storage bucket); local filesystem uploads can be lost when a hosted server is rebuilt.
+
+### Run with Docker
+
+With Docker and Docker Compose installed, run this from the repository root:
+
+```bash
+docker compose up --build
+```
+
+Open the frontend at <http://localhost:5173>. Django runs at <http://localhost:8000>; SQLite data and uploaded media persist in Docker volumes. Press `Ctrl+C` to stop the services. To stop and remove the containers, run `docker compose down`.

@@ -82,6 +82,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+SQLITE_PATH = os.getenv("SQLITE_PATH", BASE_DIR / "db.sqlite3")
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
@@ -89,7 +90,7 @@ DATABASES = {
         ssl_require=True,
     ) if DATABASE_URL else {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": SQLITE_PATH,
     }
 }
 
