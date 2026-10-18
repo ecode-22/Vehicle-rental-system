@@ -18,14 +18,18 @@ class FlowTest(APITestCase):
 
     def test_full_flow(self):
         self.auth("rent", "renter")
-        car = self.client.post("/api/cars/", {"make": "Toyota", "model": "Corolla", "year": 2022, "price_per_day": "500"}, format="json")
+        missing_handover = self.client.post("/api/cars/", {"make": "Mazda", "model": "2", "year": 2022, "price_per_day": "300"}, format="json")
+        self.assertEqual(missing_handover.status_code, 400)
+        car = self.client.post("/api/cars/", {"make": "Toyota", "model": "Corolla", "year": 2022, "price_per_day": "500", "collection_location": "Cape Town", "dropoff_location": "Stellenbosch"}, format="json")
         self.assertEqual(car.status_code, 201)
         cid = car.data["id"]
 
         self.auth("cust", "customer")
         self.assertEqual(self.client.post("/api/cars/", {"make": "x", "model": "y", "year": 2020, "price_per_day": "1"}, format="json").status_code, 403)
         s, e = date.today() + timedelta(days=1), date.today() + timedelta(days=3)
-        b = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e}, format="json")
+        wrong_handover = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Durban", "dropoff_location": "Stellenbosch"}, format="json")
+        self.assertEqual(wrong_handover.status_code, 400)
+        b = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Cape Town", "dropoff_location": "Stellenbosch"}, format="json")
         self.assertEqual(b.status_code, 201)
         self.assertEqual(float(b.data["total_price"]), 1500.0)
 
@@ -35,9 +39,50 @@ class FlowTest(APITestCase):
         self.assertEqual(self.client.post(f"/api/bookings/{b.data['id']}/confirm/").status_code, 200)
 
         self.auth("cust", "customer")
-        dup = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e}, format="json")
+        dup = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Cape Town", "dropoff_location": "Stellenbosch"}, format="json")
         self.assertEqual(dup.status_code, 400)
         self.assertEqual(self.client.get("/api/dashboard/").data["confirmed"], 1)
+
+    def test_completed_booking_unlocks_reviews_and_consent(self):
+        self.auth("review_renter", "renter")
+        car = self.client.post("/api/cars/", {"make": "Honda", "model": "Fit", "year": 2023, "price_per_day": "400", "collection_location": "Cape Town", "dropoff_location": "Cape Town"}, format="json")
+        self.assertEqual(car.status_code, 201)
+
+        self.auth("review_customer", "customer")
+        start = date.today()
+        booking = self.client.post("/api/bookings/", {"car": car.data["id"], "start_date": start, "end_date": start, "collection_location": "Cape Town", "dropoff_location": "Cape Town"}, format="json")
+        self.assertEqual(booking.status_code, 201)
+
+        self.auth("review_renter", "renter")
+        check_request = self.client.post("/api/background-checks/", {"booking_id": booking.data["id"]}, format="json")
+        self.assertEqual(check_request.status_code, 201)
+
+        self.auth("review_customer", "customer")
+        self.assertEqual(self.client.post(f"/api/background-checks/{check_request.data['id']}/respond/", {"decision": "consented"}, format="json").status_code, 200)
+        self.assertEqual(self.client.post("/api/reviews/", {"booking_id": booking.data["id"], "target_car": car.data["id"], "score": 5}, format="json").status_code, 400)
+
+        self.auth("review_renter", "renter")
+        self.assertEqual(self.client.post(f"/api/bookings/{booking.data['id']}/confirm/").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/bookings/{booking.data['id']}/complete/").status_code, 200)
+
+        self.auth("review_customer", "customer")
+        review = self.client.post("/api/reviews/", {"booking_id": booking.data["id"], "target_car": car.data["id"], "score": 5, "comment": "Clean and ready to go."}, format="json")
+        self.assertEqual(review.status_code, 201)
+        self.assertEqual(self.client.get("/api/cars/").data[0]["average_rating"], 5.0)
+        public_reviews = self.client.get(f"/api/cars/{car.data['id']}/reviews/")
+        self.assertEqual(public_reviews.status_code, 200)
+        self.assertEqual(public_reviews.data[0]["comment"], "Clean and ready to go.")
+        self.assertEqual(self.client.post("/api/reviews/", {"booking_id": booking.data["id"], "target_user": booking.data["customer"], "score": 5}, format="json").status_code, 400)
+
+    def test_renter_can_report_only_their_own_car(self):
+        self.auth("report_owner", "renter")
+        car = self.client.post("/api/cars/", {"make": "Mazda", "model": "2", "year": 2022, "price_per_day": "300", "collection_location": "Paarl", "dropoff_location": "Cape Town"}, format="json")
+        report = self.client.post("/api/problem-reports/", {"car": car.data["id"], "description": "Tyre needs inspection."}, format="json")
+        self.assertEqual(report.status_code, 201)
+        self.assertEqual(report.data["status"], "open")
+
+        self.auth("report_customer", "customer")
+        self.assertEqual(self.client.post("/api/problem-reports/", {"car": car.data["id"], "description": "Issue"}, format="json").status_code, 400)
 
     def test_renter_image_upload_is_visible_in_public_car_list(self):
         self.auth("photo_renter", "renter")
@@ -52,8 +97,14 @@ class FlowTest(APITestCase):
                 "year": 2023,
                 "price_per_day": "400",
                 "location": "Stellenbosch",
+                "collection_location": "Stellenbosch",
+                "dropoff_location": "Cape Town",
                 "available": "true",
                 "image": SimpleUploadedFile("honda-fit.png", image_bytes.read(), content_type="image/png"),
+                "photos": [
+                    SimpleUploadedFile("honda-front.png", image_bytes.getvalue(), content_type="image/png"),
+                    SimpleUploadedFile("honda-side.png", image_bytes.getvalue(), content_type="image/png"),
+                ],
             }, format="multipart")
 
             self.assertEqual(response.status_code, 201)
@@ -61,3 +112,5 @@ class FlowTest(APITestCase):
             public_cars = self.client.get("/api/cars/")
             self.assertEqual(public_cars.status_code, 200)
             self.assertEqual(public_cars.data[0]["image"], response.data["image"])
+            self.assertEqual(len(public_cars.data[0]["photos"]), 2)
+            self.assertEqual(public_cars.data[0]["photos"][0]["image"], response.data["photos"][0]["image"])

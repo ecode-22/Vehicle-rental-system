@@ -104,10 +104,26 @@ Renter car photos are saved under `backend/media/cars/` during local development
 
 ### Run with Docker
 
-With Docker and Docker Compose installed, run this from the repository root:
+The Docker backend connects to Supabase using `backend/.env`. On every PC that runs the app, create that file from the example and set `DATABASE_URL` to the same Supabase PostgreSQL connection URI:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Keep this file private and do not commit or share it publicly. The steps above explain how to get the URI; do not use the Supabase project URL or publishable key. Each PC must use the same Supabase project and database for its app data to sync.
+
+Start the app on that PC from the repository root:
 
 ```bash
 docker compose up --build
 ```
 
-Open the frontend at <http://localhost:5173>. Django runs at <http://localhost:8000>; SQLite data and uploaded media persist in Docker volumes. Press `Ctrl+C` to stop the services. To stop and remove the containers, run `docker compose down`.
+Open `http://localhost:5173` on that PC. To let other devices use one running copy over a local network, choose a host PC, find its LAN IPv4 address (for example, `192.168.1.25`), and create a root `.env` file containing:
+
+```env
+HOST_IP=192.168.1.25
+```
+
+Replace the example with the host PC's actual address, then start Compose there. Everyone should open `http://192.168.1.25:5173` using that same address. If other devices cannot connect, allow inbound TCP ports `5173` and `8000` through the host PC's firewall and ensure they are on the same network.
+
+Uploaded media is stored in a Docker volume on the machine running the backend; database records are stored in Supabase. This Docker setup is for development/demo use on a trusted local network, not public internet deployment.

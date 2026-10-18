@@ -86,7 +86,7 @@ SQLITE_PATH = os.getenv("SQLITE_PATH", BASE_DIR / "db.sqlite3")
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
-        conn_max_age=600,
+        conn_max_age=0,
         ssl_require=True,
     ) if DATABASE_URL else {
         "ENGINE": "django.db.backends.sqlite3",
