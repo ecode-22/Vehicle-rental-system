@@ -1,8 +1,10 @@
+from django.db import transaction
 from django.db.models import Avg, Count, Sum, Q
 from django.utils import timezone
 from rest_framework import viewsets, permissions, serializers, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
 from .models import BackgroundCheckRequest, Car, CarPhoto, Booking, ProblemReport, Review
 from .serializers import BackgroundCheckRequestSerializer, CarPhotoSerializer, CarSerializer, BookingSerializer, ProblemReportSerializer, ReviewSerializer
@@ -16,14 +18,17 @@ class CarViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Car.objects.select_related("owner").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
         p = self.request.query_params
+        if p.get("max_price"):
+            max_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0).run_validation(p["max_price"])
+            qs = qs.filter(price_per_day__lte=max_price)
         if p.get("search"):
             qs = qs.filter(Q(make__icontains=p["search"]) | Q(model__icontains=p["search"]) | Q(location__icontains=p["search"]))
-        if p.get("max_price"):
-            qs = qs.filter(price_per_day__lte=p["max_price"])
         if p.get("transmission"):
             qs = qs.filter(transmission=p["transmission"])
         if p.get("fuel"):
             qs = qs.filter(fuel=p["fuel"])
+        if self.action != "mine":
+            qs = qs.filter(is_archived=False)
         if self.action == "list" and p.get("all") != "1":
             qs = qs.filter(available=True)
         return qs
@@ -45,6 +50,11 @@ class CarViewSet(viewsets.ModelViewSet):
     def mine(self, request):
         cars = Car.objects.filter(owner=request.user).annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
         return Response(CarSerializer(cars, many=True).data)
+
+    def perform_destroy(self, instance):
+        instance.available = False
+        instance.is_archived = True
+        instance.save(update_fields=["available", "is_archived"])
 
     @action(detail=True, methods=["get"], permission_classes=[permissions.AllowAny])
     def reviews(self, request, pk=None):
@@ -71,12 +81,23 @@ class BookingViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def confirm(self, request, pk=None):
         b = self.get_object()
-        if request.user.role != "renter" or b.status != Booking.PENDING:
-            return Response({"detail": "Not allowed."}, status=403)
-        if Booking.overlapping(b.car, b.start_date, b.end_date, b.id).exists():
-            return Response({"detail": "Dates conflict with a confirmed booking."}, status=400)
-        b.status = Booking.CONFIRMED
-        b.save()
+        with transaction.atomic():
+            Car.objects.select_for_update().get(pk=b.car_id)
+            b = Booking.objects.select_for_update().get(pk=b.pk)
+            if request.user.role != "renter" or b.car.owner_id != request.user.id or b.status != Booking.PENDING:
+                return Response({"detail": "Not allowed."}, status=403)
+            if b.car.is_archived or not b.car.available:
+                return Response({"detail": "This car is no longer available."}, status=400)
+            if Booking.overlapping(b.car, b.start_date, b.end_date, b.id).exists():
+                return Response({"detail": "Dates conflict with a confirmed booking."}, status=400)
+            b.status = Booking.CONFIRMED
+            b.save(update_fields=["status"])
+            Booking.objects.filter(
+                car=b.car,
+                status=Booking.PENDING,
+                start_date__lte=b.end_date,
+                end_date__gte=b.start_date,
+            ).exclude(pk=b.pk).update(status=Booking.REJECTED)
         return Response(BookingSerializer(b).data)
 
     @action(detail=True, methods=["post"])
@@ -175,7 +196,14 @@ class BackgroundCheckRequestViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         if request.user.role != "renter":
             return Response({"detail": "Only renters can request background-check consent."}, status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        check_request, created = BackgroundCheckRequest.objects.get_or_create(
+            booking=serializer.validated_data["booking"]
+        )
+        response_serializer = self.get_serializer(check_request)
+        headers = self.get_success_headers(response_serializer.data)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK, headers=headers)
 
     @action(detail=True, methods=["post"])
     def respond(self, request, pk=None):

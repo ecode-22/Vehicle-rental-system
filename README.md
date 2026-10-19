@@ -127,3 +127,7 @@ HOST_IP=192.168.1.25
 Replace the example with the host PC's actual address, then start Compose there. Everyone should open `http://192.168.1.25:5173` using that same address. If other devices cannot connect, allow inbound TCP ports `5173` and `8000` through the host PC's firewall and ensure they are on the same network.
 
 Uploaded media is stored in a Docker volume on the machine running the backend; database records are stored in Supabase. This Docker setup is for development/demo use on a trusted local network, not public internet deployment.
+
+### Production Django settings
+
+For a production deployment, set `DJANGO_DEBUG=false` and provide a high-entropy `DJANGO_SECRET_KEY` in the backend environment. Configure `DJANGO_ALLOWED_HOSTS` and `DJANGO_CORS_ALLOWED_ORIGINS` for the deployed host, and use HTTPS. Set `DJANGO_SECURE_SSL_REDIRECT=true`, a reviewed `DJANGO_SECURE_HSTS_SECONDS` value, and secure-cookie settings. If TLS terminates at a trusted reverse proxy, set `DJANGO_SECURE_PROXY_SSL_HEADER=true` only when that proxy overwrites the forwarded-protocol header. Configure `DJANGO_EMAIL_HOST`, `DJANGO_EMAIL_HOST_USER`, `DJANGO_EMAIL_HOST_PASSWORD`, and `DJANGO_DEFAULT_FROM_EMAIL`; production defaults to SMTP rather than the development console backend. Do not copy secrets into source control.

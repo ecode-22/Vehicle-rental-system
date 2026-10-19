@@ -1,4 +1,5 @@
-from datetime import date
+from decimal import Decimal, InvalidOperation
+from django.utils import timezone
 from rest_framework import serializers
 from .models import BackgroundCheckRequest, Booking, Car, CarPhoto, ProblemReport, Review
 
@@ -21,7 +22,7 @@ class CarSerializer(serializers.ModelSerializer):
     class Meta:
         model = Car
         fields = "__all__"
-        read_only_fields = ["owner", "created_at"]
+        read_only_fields = ["owner", "created_at", "is_archived"]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -147,7 +148,7 @@ class BookingSerializer(serializers.ModelSerializer):
         start, end, car = data["start_date"], data["end_date"], data["car"]
         if end < start:
             raise serializers.ValidationError("End date must be on or after start date.")
-        if start < date.today():
+        if start < timezone.localdate():
             raise serializers.ValidationError("Start date cannot be in the past.")
         if not car.available:
             raise serializers.ValidationError("This car is not available.")

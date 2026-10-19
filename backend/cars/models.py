@@ -18,6 +18,7 @@ class Car(models.Model):
     image = models.ImageField(upload_to="cars/", blank=True, null=True)
     description = models.TextField(blank=True)
     available = models.BooleanField(default=True)
+    is_archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -40,7 +41,7 @@ class Booking(models.Model):
     PENDING, CONFIRMED, REJECTED, CANCELLED, COMPLETED = "pending", "confirmed", "rejected", "cancelled", "completed"
     STATUSES = [(s, s.title()) for s in (PENDING, CONFIRMED, REJECTED, CANCELLED, COMPLETED)]
 
-    car = models.ForeignKey(Car, on_delete=models.CASCADE, related_name="bookings")
+    car = models.ForeignKey(Car, on_delete=models.PROTECT, related_name="bookings")
     customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bookings")
     start_date = models.DateField()
     end_date = models.DateField()

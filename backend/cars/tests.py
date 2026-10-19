@@ -32,11 +32,15 @@ class FlowTest(APITestCase):
         b = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Cape Town", "dropoff_location": "Stellenbosch"}, format="json")
         self.assertEqual(b.status_code, 201)
         self.assertEqual(float(b.data["total_price"]), 1500.0)
+        competing = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Cape Town", "dropoff_location": "Stellenbosch"}, format="json")
+        self.assertEqual(competing.status_code, 201)
 
         self.auth("rent", "renter")
         d = self.client.get("/api/dashboard/").data
-        self.assertEqual(d["pending_requests"], 1)
+        self.assertEqual(d["pending_requests"], 2)
         self.assertEqual(self.client.post(f"/api/bookings/{b.data['id']}/confirm/").status_code, 200)
+        competing_result = next(row for row in self.client.get("/api/bookings/").data if row["id"] == competing.data["id"])
+        self.assertEqual(competing_result["status"], "rejected")
 
         self.auth("cust", "customer")
         dup = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Cape Town", "dropoff_location": "Stellenbosch"}, format="json")
@@ -56,6 +60,9 @@ class FlowTest(APITestCase):
         self.auth("review_renter", "renter")
         check_request = self.client.post("/api/background-checks/", {"booking_id": booking.data["id"]}, format="json")
         self.assertEqual(check_request.status_code, 201)
+        repeated_check_request = self.client.post("/api/background-checks/", {"booking_id": booking.data["id"]}, format="json")
+        self.assertEqual(repeated_check_request.status_code, 200)
+        self.assertEqual(repeated_check_request.data["id"], check_request.data["id"])
 
         self.auth("review_customer", "customer")
         self.assertEqual(self.client.post(f"/api/background-checks/{check_request.data['id']}/respond/", {"decision": "consented"}, format="json").status_code, 200)
@@ -83,6 +90,30 @@ class FlowTest(APITestCase):
 
         self.auth("report_customer", "customer")
         self.assertEqual(self.client.post("/api/problem-reports/", {"car": car.data["id"], "description": "Issue"}, format="json").status_code, 400)
+
+    def test_invalid_price_filter_returns_validation_error(self):
+        for value in ("abc", "-1", "NaN"):
+            response = self.client.get(f"/api/cars/?max_price={value}")
+            self.assertEqual(response.status_code, 400)
+
+    def test_deleting_car_archives_it_and_preserves_booking_history(self):
+        self.auth("archive_owner", "renter")
+        car = self.client.post("/api/cars/", {"make": "Kia", "model": "Picanto", "year": 2024, "price_per_day": "250", "collection_location": "Cape Town", "dropoff_location": "Cape Town"}, format="json")
+        self.assertEqual(car.status_code, 201)
+
+        self.auth("archive_customer", "customer")
+        start = date.today() + timedelta(days=2)
+        booking = self.client.post("/api/bookings/", {"car": car.data["id"], "start_date": start, "end_date": start, "collection_location": "Cape Town", "dropoff_location": "Cape Town"}, format="json")
+        self.assertEqual(booking.status_code, 201)
+
+        self.auth("archive_owner", "renter")
+        deleted = self.client.delete(f"/api/cars/{car.data['id']}/")
+        self.assertEqual(deleted.status_code, 204)
+        self.assertEqual(self.client.get("/api/cars/mine/").data[0]["is_archived"], True)
+        self.assertFalse(any(row["id"] == car.data["id"] for row in self.client.get("/api/cars/").data))
+
+        self.auth("archive_customer", "customer")
+        self.assertEqual(self.client.get("/api/bookings/").data[0]["id"], booking.data["id"])
 
     def test_renter_image_upload_is_visible_in_public_car_list(self):
         self.auth("photo_renter", "renter")
