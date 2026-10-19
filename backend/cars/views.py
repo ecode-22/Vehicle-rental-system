@@ -18,6 +18,22 @@ class CarViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Car.objects.select_related("owner").prefetch_related("photos").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
         p = self.request.query_params
+        start_value, end_value = p.get("start_date"), p.get("end_date")
+        if bool(start_value) != bool(end_value):
+            raise ValidationError({"date_range": "Provide both start_date and end_date."})
+        if start_value and end_value:
+            date_field = serializers.DateField()
+            start_date = date_field.run_validation(start_value)
+            end_date = date_field.run_validation(end_value)
+            if end_date < start_date:
+                raise ValidationError({"end_date": "End date must be on or after start_date."})
+            if start_date < timezone.localdate():
+                raise ValidationError({"start_date": "Start date cannot be in the past."})
+            qs = qs.exclude(
+                bookings__status=Booking.CONFIRMED,
+                bookings__start_date__lte=end_date,
+                bookings__end_date__gte=start_date,
+            )
         if p.get("max_price"):
             max_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0).run_validation(p["max_price"])
             qs = qs.filter(price_per_day__lte=max_price)
@@ -61,6 +77,12 @@ class CarViewSet(viewsets.ModelViewSet):
         car = self.get_object()
         reviews = Review.objects.filter(target_car=car).select_related("reviewer").order_by("-created_at")
         return Response(ReviewSerializer(reviews, many=True).data)
+
+    @action(detail=True, methods=["get"], permission_classes=[permissions.AllowAny])
+    def availability(self, request, pk=None):
+        car = self.get_object()
+        bookings = Booking.objects.filter(car=car, status=Booking.CONFIRMED).values("start_date", "end_date")
+        return Response(list(bookings))
 
 
 class BookingViewSet(viewsets.ModelViewSet):

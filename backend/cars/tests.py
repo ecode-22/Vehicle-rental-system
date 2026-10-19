@@ -135,6 +135,40 @@ class FlowTest(APITestCase):
         self.assertIsNone(response.data["latitude"])
         self.assertIsNone(response.data["longitude"])
 
+    def test_date_search_excludes_confirmed_overlap_and_exposes_availability(self):
+        self.auth("date_owner", "renter")
+        car = self.client.post("/api/cars/", {
+            "make": "Mazda",
+            "model": "3",
+            "year": 2024,
+            "price_per_day": "350",
+            "collection_location": "Cape Town",
+            "dropoff_location": "Cape Town",
+        }, format="json")
+        self.assertEqual(car.status_code, 201)
+
+        start = timezone.localdate() + timedelta(days=10)
+        end = start + timedelta(days=2)
+        self.auth("date_customer", "customer")
+        booking = self.client.post("/api/bookings/", {
+            "car": car.data["id"],
+            "start_date": start,
+            "end_date": end,
+            "collection_location": "Cape Town",
+            "dropoff_location": "Cape Town",
+        }, format="json")
+        self.assertEqual(booking.status_code, 201)
+
+        self.auth("date_owner", "renter")
+        self.assertEqual(self.client.post(f"/api/bookings/{booking.data['id']}/confirm/").status_code, 200)
+        availability = self.client.get(f"/api/cars/{car.data['id']}/availability/")
+        self.assertEqual(availability.status_code, 200)
+        self.assertEqual(availability.data, [{"start_date": start, "end_date": end}])
+
+        query = f"start_date={start.isoformat()}&end_date={end.isoformat()}"
+        self.assertEqual(self.client.get(f"/api/cars/?{query}").data, [])
+        self.assertEqual(self.client.get(f"/api/cars/?start_date={start.isoformat()}").status_code, 400)
+
     def test_public_car_list_preloads_owner_and_photos(self):
         self.auth("query_owner", "renter")
         for index in range(3):
