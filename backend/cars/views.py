@@ -16,7 +16,7 @@ class CarViewSet(viewsets.ModelViewSet):
     permission_classes = [IsRenterOrReadOnly]
 
     def get_queryset(self):
-        qs = Car.objects.select_related("owner").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
+        qs = Car.objects.select_related("owner").prefetch_related("photos").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
         p = self.request.query_params
         if p.get("max_price"):
             max_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0).run_validation(p["max_price"])
@@ -48,7 +48,7 @@ class CarViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, permission_classes=[permissions.IsAuthenticated])
     def mine(self, request):
-        cars = Car.objects.filter(owner=request.user).annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
+        cars = Car.objects.filter(owner=request.user).select_related("owner").prefetch_related("photos").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
         return Response(CarSerializer(cars, many=True).data)
 
     def perform_destroy(self, instance):
@@ -70,7 +70,7 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         u = self.request.user
-        qs = Booking.objects.select_related("car", "customer")
+        qs = Booking.objects.select_related("car__owner", "customer").prefetch_related("car__photos")
         return qs.filter(car__owner=u) if u.role == "renter" else qs.filter(customer=u)
 
     def create(self, request, *a, **kw):
@@ -134,7 +134,7 @@ class DashboardView(APIView):
     def get(self, request):
         u = request.user
         if u.role == "renter":
-            bookings = Booking.objects.filter(car__owner=u)
+            bookings = Booking.objects.filter(car__owner=u).select_related("car__owner", "customer").prefetch_related("car__photos")
             revenue = bookings.filter(status__in=["confirmed", "completed"]).aggregate(s=Sum("total_price"))["s"] or 0
             rating = Review.objects.filter(target_user=u).aggregate(average=Avg("score"), count=Count("id"))
             return Response({
@@ -147,7 +147,7 @@ class DashboardView(APIView):
                 "rating_count": rating["count"],
                 "recent": BookingSerializer(bookings[:5], many=True).data,
             })
-        bookings = Booking.objects.filter(customer=u)
+        bookings = Booking.objects.filter(customer=u).select_related("car__owner", "customer").prefetch_related("car__photos")
         spent = bookings.filter(status__in=["confirmed", "completed"]).aggregate(s=Sum("total_price"))["s"] or 0
         return Response({
             "role": "customer",

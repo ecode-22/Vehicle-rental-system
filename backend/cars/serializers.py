@@ -18,6 +18,8 @@ class CarSerializer(serializers.ModelSerializer):
     photos = CarPhotoSerializer(many=True, read_only=True)
     collection_location = serializers.CharField(required=True, allow_blank=False)
     dropoff_location = serializers.CharField(required=True, allow_blank=False)
+    latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
 
     class Meta:
         model = Car
@@ -43,6 +45,10 @@ class CarSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"photos": "A car can have up to 10 photos."})
         if any(image.size > 8 * 1024 * 1024 for image in uploads):
             raise serializers.ValidationError({"photos": "Each photo must be 8 MB or smaller."})
+        latitude = data.get("latitude", self.instance.latitude if self.instance else None)
+        longitude = data.get("longitude", self.instance.longitude if self.instance else None)
+        if (latitude is None) != (longitude is None):
+            raise serializers.ValidationError({"latitude": "Latitude and longitude must be provided together."})
         location = data.get("location")
         if not location and data.get("collection_location"):
             data["location"] = data["collection_location"]

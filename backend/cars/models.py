@@ -14,6 +14,8 @@ class Car(models.Model):
     location = models.CharField(max_length=100, blank=True)
     collection_location = models.CharField(max_length=180, blank=True)
     dropoff_location = models.CharField(max_length=180, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
     image_url = models.URLField(blank=True)
     image = models.ImageField(upload_to="cars/", blank=True, null=True)
     description = models.TextField(blank=True)

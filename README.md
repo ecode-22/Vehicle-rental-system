@@ -131,3 +131,17 @@ Uploaded media is stored in a Docker volume on the machine running the backend; 
 ### Production Django settings
 
 For a production deployment, set `DJANGO_DEBUG=false` and provide a high-entropy `DJANGO_SECRET_KEY` in the backend environment. Configure `DJANGO_ALLOWED_HOSTS` and `DJANGO_CORS_ALLOWED_ORIGINS` for the deployed host, and use HTTPS. Set `DJANGO_SECURE_SSL_REDIRECT=true`, a reviewed `DJANGO_SECURE_HSTS_SECONDS` value, and secure-cookie settings. If TLS terminates at a trusted reverse proxy, set `DJANGO_SECURE_PROXY_SSL_HEADER=true` only when that proxy overwrites the forwarded-protocol header. Configure `DJANGO_EMAIL_HOST`, `DJANGO_EMAIL_HOST_USER`, `DJANGO_EMAIL_HOST_PASSWORD`, and `DJANGO_DEFAULT_FROM_EMAIL`; production defaults to SMTP rather than the development console backend. Do not copy secrets into source control.
+
+# Disigen ellements
+- Green and Bluuu
+- Reonded coners
+- Loding Spinners ( Circular, Dotes, Loding bar, )
+- Windowes anemations
+- URL Custemizasion
+- Back grounds
+- Map Animations 
+
+# Bug fixes
+- Map
+- Car posting (Place name recomendations)
+- Window 

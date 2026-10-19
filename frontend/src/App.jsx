@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 /* ================= CONFIG & API ================= */
 const CURRENCY = "R";
 const getApi = () => localStorage.getItem("apiBase") || import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+const placeCache = new Map();
 
 function errText(d) {
   if (!d) return "Request failed";
@@ -63,13 +64,17 @@ const money = n => CURRENCY + Number(n || 0).toLocaleString(undefined, { maximum
 const todayStr = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
 async function locatePlace(place) {
-  if (!place.trim()) return null;
+  const normalizedPlace = place.trim().toLowerCase();
+  if (!normalizedPlace) return null;
+  if (placeCache.has(normalizedPlace)) return placeCache.get(normalizedPlace);
   try {
     const query = new URLSearchParams({ q: `${place}, South Africa`, format: "jsonv2", limit: "1", countrycodes: "za" });
     const response = await fetch(`https://nominatim.openstreetmap.org/search?${query}`);
     if (!response.ok) return null;
     const [result] = await response.json();
-    return result ? [Number(result.lat), Number(result.lon)] : null;
+    const coordinates = result ? [Number(result.lat), Number(result.lon)] : null;
+    if (coordinates) placeCache.set(normalizedPlace, coordinates);
+    return coordinates;
   } catch {
     return null;
   }
@@ -141,9 +146,9 @@ function LocationInput({ id, label, value, onChange, required = false, placehold
   return (
     <div className="location-picker">
       <label htmlFor={id}>{label}</label>
-      <input id={id} required={required} autoComplete="off" placeholder={placeholder} value={value} onFocus={() => setActive(true)} onChange={e => { onChange(e.target.value); setActive(true); }} />
+      <input id={id} required={required} autoComplete="off" placeholder={placeholder} value={value} onFocus={() => setActive(true)} onChange={e => { onChange(e.target.value, null); setActive(true); }} />
       {active && suggestions.length > 0 && <div className="location-suggestions" role="listbox">
-        {suggestions.map(place => <button type="button" role="option" key={place.place_id} onClick={() => { onChange(placeLabel(place)); setSuggestions([]); setActive(false); }}><MapPin size={14} /><span>{placeLabel(place)}</span></button>)}
+        {suggestions.map(place => <button type="button" role="option" key={place.place_id} onClick={() => { onChange(placeLabel(place), [Number(place.lat), Number(place.lon)]); setSuggestions([]); setActive(false); }}><MapPin size={14} /><span>{placeLabel(place)}</span></button>)}
       </div>}
     </div>
   );
@@ -212,7 +217,8 @@ function CarDetailModal({ car, onClose, onDone }) {
   useEffect(() => {
     let active = true;
     api(`/cars/${car.id}/reviews/`, { auth: false }).then(data => { if (active) setReviews(data); }).catch(() => {});
-    Promise.all([locatePlace(collectionPoint), locatePlace(dropoffPoint)]).then(points => {
+    const collectionCoordinates = car.latitude != null && car.longitude != null ? [car.latitude, car.longitude] : null;
+    Promise.all([collectionCoordinates || locatePlace(collectionPoint), locatePlace(dropoffPoint)]).then(points => {
       if (active) setMapPoints(points.filter(Boolean));
     });
     return () => { active = false; };
@@ -337,7 +343,9 @@ function BookingMapModal({ booking, onClose }) {
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    Promise.all([locatePlace(booking.collection_location), locatePlace(booking.dropoff_location)]).then(result => {
+    const car = booking.car_detail;
+    const collectionCoordinates = car.latitude != null && car.longitude != null ? [car.latitude, car.longitude] : null;
+    Promise.all([collectionCoordinates || locatePlace(booking.collection_location), locatePlace(booking.dropoff_location)]).then(result => {
       if (active) { setPoints(result.filter(Boolean)); setLoaded(true); }
     });
     return () => { active = false; };
@@ -376,18 +384,11 @@ function CarsPage({ user, go }) {
 
   useEffect(() => {
     if (!cars) return undefined;
-    let active = true;
-    setMapCars(cars.map(car => ({ ...car, coordinates: null })));
-    const resolveCars = async () => {
-      const resolved = [];
-      for (const car of cars) {
-        const coordinates = await locatePlace(car.location || "");
-        resolved.push({ ...car, coordinates });
-        if (active) setMapCars([...resolved, ...cars.slice(resolved.length).map(item => ({ ...item, coordinates: null }))]);
-      }
-    };
-    resolveCars();
-    return () => { active = false; };
+    setMapCars(cars.map(car => ({
+      ...car,
+      coordinates: car.latitude != null && car.longitude != null ? [car.latitude, car.longitude] : null
+    })));
+    return undefined;
   }, [cars]);
 
   const set = k => e => setF({ ...f, [k]: e.target.value });
@@ -492,7 +493,7 @@ function CarsPage({ user, go }) {
 }
 
 /* ================= RENTER: FLEET ================= */
-const blankCar = { make: "", model: "", year: new Date().getFullYear(), price_per_day: "", seats: 5, transmission: "manual", fuel: "petrol", location: "", collection_location: "", dropoff_location: "", image_url: "", description: "", available: true };
+const blankCar = { make: "", model: "", year: new Date().getFullYear(), price_per_day: "", seats: 5, transmission: "manual", fuel: "petrol", location: "", collection_location: "", dropoff_location: "", latitude: null, longitude: null, image_url: "", description: "", available: true };
 
 function CarForm({ car, onClose, onSaved }) {
   const [f, setF] = useState(car || blankCar);
@@ -513,7 +514,7 @@ function CarForm({ car, onClose, onSaved }) {
   const submit = async e => {
     e.preventDefault(); setErr(""); setBusy(true);
     const body = new FormData();
-    Object.entries({ make: f.make, model: f.model, year: +f.year, price_per_day: f.price_per_day, seats: +f.seats, transmission: f.transmission, fuel: f.fuel, location: fValue.collection_location, collection_location: fValue.collection_location, dropoff_location: fValue.dropoff_location, image_url: f.image_url, description: f.description, available: f.available }).forEach(([key, value]) => body.append(key, String(value)));
+    Object.entries({ make: f.make, model: f.model, year: +f.year, price_per_day: f.price_per_day, seats: +f.seats, transmission: f.transmission, fuel: f.fuel, location: fValue.collection_location, collection_location: fValue.collection_location, dropoff_location: fValue.dropoff_location, latitude: f.latitude ?? "", longitude: f.longitude ?? "", image_url: f.image_url, description: f.description, available: f.available }).forEach(([key, value]) => body.append(key, String(value)));
     imageFiles.forEach(file => body.append("photos", file));
     try {
       await api(car ? `/cars/${car.id}/` : "/cars/", { method: car ? "PATCH" : "POST", body });
@@ -535,7 +536,7 @@ function CarForm({ car, onClose, onSaved }) {
           <div><label>Fuel</label><select value={f.fuel} onChange={set("fuel")}><option value="petrol">Petrol</option><option value="diesel">Diesel</option><option value="electric">Electric</option><option value="hybrid">Hybrid</option></select></div>
         </div>
         <div className="two location-fields">
-          <LocationInput id="collection-location" label="Collection location *" required value={fValue.collection_location} onChange={value => setF({ ...f, collection_location: value, location: value })} />
+          <LocationInput id="collection-location" label="Collection location *" required value={fValue.collection_location} onChange={(value, coordinates) => setF({ ...f, collection_location: value, location: value, latitude: coordinates?.[0] ?? null, longitude: coordinates?.[1] ?? null })} />
           <LocationInput id="dropoff-location" label="Drop-off location *" required value={fValue.dropoff_location} onChange={value => setF({ ...f, dropoff_location: value })} />
         </div>
         <label>Car photos <span className="sub">(up to {Math.max(0, 10 - oldPhotos.length)} more)</span></label>

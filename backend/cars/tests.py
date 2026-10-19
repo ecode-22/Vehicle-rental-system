@@ -1,10 +1,11 @@
 from io import BytesIO
 import tempfile
-from datetime import date, timedelta
+from datetime import timedelta
 from PIL import Image
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 from django.test.utils import override_settings
+from django.utils import timezone
 from accounts.models import User
 
 
@@ -26,7 +27,7 @@ class FlowTest(APITestCase):
 
         self.auth("cust", "customer")
         self.assertEqual(self.client.post("/api/cars/", {"make": "x", "model": "y", "year": 2020, "price_per_day": "1"}, format="json").status_code, 403)
-        s, e = date.today() + timedelta(days=1), date.today() + timedelta(days=3)
+        s, e = timezone.localdate() + timedelta(days=1), timezone.localdate() + timedelta(days=3)
         wrong_handover = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Durban", "dropoff_location": "Stellenbosch"}, format="json")
         self.assertEqual(wrong_handover.status_code, 400)
         b = self.client.post("/api/bookings/", {"car": cid, "start_date": s, "end_date": e, "collection_location": "Cape Town", "dropoff_location": "Stellenbosch"}, format="json")
@@ -53,7 +54,7 @@ class FlowTest(APITestCase):
         self.assertEqual(car.status_code, 201)
 
         self.auth("review_customer", "customer")
-        start = date.today()
+        start = timezone.localdate()
         booking = self.client.post("/api/bookings/", {"car": car.data["id"], "start_date": start, "end_date": start, "collection_location": "Cape Town", "dropoff_location": "Cape Town"}, format="json")
         self.assertEqual(booking.status_code, 201)
 
@@ -96,13 +97,71 @@ class FlowTest(APITestCase):
             response = self.client.get(f"/api/cars/?max_price={value}")
             self.assertEqual(response.status_code, 400)
 
+    def test_car_coordinates_are_saved_and_validated(self):
+        self.auth("coordinate_owner", "renter")
+        payload = {
+            "make": "Toyota",
+            "model": "Yaris",
+            "year": 2024,
+            "price_per_day": "300",
+            "collection_location": "Cape Town",
+            "dropoff_location": "Cape Town",
+            "latitude": -33.9249,
+            "longitude": 18.4241,
+        }
+        created = self.client.post("/api/cars/", payload, format="json")
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["latitude"], -33.9249)
+        self.assertEqual(created.data["longitude"], 18.4241)
+
+        invalid = {**payload, "model": "Invalid", "latitude": 100}
+        self.assertEqual(self.client.post("/api/cars/", invalid, format="json").status_code, 400)
+
+        incomplete = {**payload, "model": "Incomplete", "longitude": None}
+        self.assertEqual(self.client.post("/api/cars/", incomplete, format="json").status_code, 400)
+
+        unlocated = {
+            "make": "Honda",
+            "model": "Unlocated",
+            "year": 2024,
+            "price_per_day": "300",
+            "collection_location": "Paarl",
+            "dropoff_location": "Paarl",
+            "latitude": "",
+            "longitude": "",
+        }
+        response = self.client.post("/api/cars/", unlocated, format="multipart")
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.data["latitude"])
+        self.assertIsNone(response.data["longitude"])
+
+    def test_public_car_list_preloads_owner_and_photos(self):
+        self.auth("query_owner", "renter")
+        for index in range(3):
+            response = self.client.post("/api/cars/", {
+                "make": "Toyota",
+                "model": f"Model {index}",
+                "year": 2024,
+                "price_per_day": "300",
+                "collection_location": "Cape Town",
+                "dropoff_location": "Cape Town",
+            }, format="json")
+            self.assertEqual(response.status_code, 201)
+
+        self.client.credentials()
+        with self.assertNumQueries(2):
+            response = self.client.get("/api/cars/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+
     def test_deleting_car_archives_it_and_preserves_booking_history(self):
         self.auth("archive_owner", "renter")
         car = self.client.post("/api/cars/", {"make": "Kia", "model": "Picanto", "year": 2024, "price_per_day": "250", "collection_location": "Cape Town", "dropoff_location": "Cape Town"}, format="json")
         self.assertEqual(car.status_code, 201)
 
         self.auth("archive_customer", "customer")
-        start = date.today() + timedelta(days=2)
+        start = timezone.localdate() + timedelta(days=2)
         booking = self.client.post("/api/bookings/", {"car": car.data["id"], "start_date": start, "end_date": start, "collection_location": "Cape Town", "dropoff_location": "Cape Town"}, format="json")
         self.assertEqual(booking.status_code, 201)
 
