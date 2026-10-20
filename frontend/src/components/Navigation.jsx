@@ -4,7 +4,7 @@ export default function Navigation({ page, path, user, onNavigate, onLogout, the
   return (
     <nav>
       <div className="wrap">
-        <button className="logo logo-button" type="button" onClick={() => onNavigate("cars")} aria-label="DriveEasy discovery">GO</button>
+        <button className="logo logo-button" type="button" onClick={() => onNavigate("cars")} aria-label="DriveEasy discovery">Drive<span>Easy</span></button>
         <button className={`link ${page === "cars" ? "active" : ""}`} onClick={() => onNavigate("cars")}>Discover</button>
         {user ? <>
           <button className={`link ${page === "dashboard" ? "active" : ""}`} onClick={() => onNavigate("dashboard")}>My trips</button>

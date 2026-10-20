@@ -1,4 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+html{min-height:100%;background:radial-gradient(ellipse at 8% 0%,rgba(64,130,101,.16),transparent 38%),radial-gradient(ellipse at 100% 22%,rgba(98,102,74,.09),transparent 34%),var(--bg)}
+body,#root{min-height:100vh}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:transparent;color:var(--text);transition:background-color .25s ease,color .25s ease}
+.handover-points>div{display:flex;align-items:flex-start;gap:8px;min-width:0;padding:10px;background:var(--surface-raised);border:1px solid var(--line);border-radius:4px;color:var(--brand);font-size:12px;line-height:1.45}
 :root{font-family:'DM Sans',sans-serif;color:#202b28;background:#f5f7f4;font-synthesis:none;text-rendering:optimizeLegibility;--bg:#f5f7f4;--card:#fff;--text:#202b28;--muted:#697872;--line:#dce5df;--brand:#176b58;--brand-d:#105443;--ok:#177b59;--warn:#9a6710;--bad:#c04f3b;--coral:#cf604a;--mint:#dcece3;--shadow:0 12px 34px rgba(29,60,48,.08)}
 *{box-sizing:border-box}
 body{margin:0;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-width:320px}
@@ -233,6 +237,27 @@ table td{border-color:var(--line)}
 .modal{box-shadow:0 28px 90px rgba(0,0,0,.4)}
 .price,.detail-price,.booking-total b,.stat b{font-family:'Space Mono',monospace;font-variant-numeric:tabular-nums}
 .car.selected{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand),var(--shadow)}
+.car-detail-page{max-width:1180px;min-height:65vh;margin:0 auto;padding:16px 0 48px;animation:surface-enter .36s ease both}
+.car-back-link{margin:0 0 14px;color:var(--muted)}
+.car-detail-heading{display:flex;justify-content:space-between;align-items:end;gap:16px;padding:5px 0 18px}
+.car-detail-heading h1{margin:5px 0 0;font-size:32px}
+.car-detail-layout{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:28px;align-items:start}
+.car-detail-main{display:grid;gap:20px;min-width:0}
+.car-detail-main .gallery-main{aspect-ratio:16/9;border:1px solid var(--line);border-radius:6px}
+.car-detail-section{padding:18px 0;border-top:1px solid var(--line)}
+.car-detail-section h2{margin:0 0 10px;font-size:19px}
+.car-detail-section>p:not(.sub){max-width:760px;color:var(--muted);font-size:14px;line-height:1.65}
+.car-specs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}
+.car-specs span{padding:6px 9px;border:1px solid var(--line);border-radius:4px;background:var(--surface-raised);font-size:12px;text-transform:capitalize}
+.owner-trust{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
+.owner-trust svg{color:var(--brand)}
+.car-calendar-section .availability-calendar{max-width:360px}
+.car-booking-sticky{position:sticky;top:88px}
+.car-booking-card{padding:20px;background:var(--surface-glass);border:1px solid var(--line);border-radius:6px;box-shadow:var(--shadow);backdrop-filter:blur(16px)}
+.car-booking-card .sub{margin:5px 0 14px;font-size:12px}
+.car-booking-card label{margin-top:11px}
+.car-book-button{width:100%;margin-top:15px;min-height:46px}
+.car-booking-card .booking-assurance{line-height:1.5}
 .theme-toggle{flex:none;width:36px;height:36px;padding:0}
 .modal-heading{margin-bottom:10px}.modal-heading h2{margin:0}
 .modal-close{font-size:21px;line-height:1}
@@ -260,4 +285,5 @@ table td{border-color:var(--line)}
 .checkout-actions{display:flex;gap:8px;align-items:center}
 .logo-button{padding:0;border:0;background:none;color:var(--text);text-align:left}
 @media(max-width:700px){.search-trip-dates{grid-template-columns:1fr 1fr}.checkout-steps{gap:3px}.checkout-steps button{font-size:9px;gap:4px}.checkout-steps button>span{width:20px;height:20px}}
+@media(max-width:800px){.car-detail-layout{grid-template-columns:1fr}.car-booking-sticky{position:sticky;z-index:10;bottom:0;top:auto;margin:0 -14px;padding:10px 14px;background:var(--bg);border-top:1px solid var(--line)}.car-booking-card{padding:13px;display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.car-booking-card .detail-price,.car-booking-card>.sub,.car-booking-card .booking-total,.car-booking-card .err,.car-booking-card .car-book-button,.car-booking-card .booking-assurance{grid-column:1/-1}.car-booking-card label{margin-top:6px}.car-booking-card input{padding:8px}.car-booking-card .booking-total{margin-top:8px}.car-detail-heading{align-items:start;flex-direction:column}.car-detail-heading h1{font-size:27px}}
 @media(prefers-reduced-motion:reduce){.skeleton-block::after,.request-progress span{animation:none}.request-progress.active span{width:100%}}

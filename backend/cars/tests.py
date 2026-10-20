@@ -1,3 +1,5 @@
+import importlib
+import os
 from io import BytesIO
 import tempfile
 from datetime import timedelta
@@ -10,6 +12,29 @@ from accounts.models import User
 
 
 class FlowTest(APITestCase):
+    def test_missing_env_defaults_to_dev_settings(self):
+        import config.settings as settings_module
+
+        original_debug = os.environ.get("DJANGO_DEBUG")
+        original_secret = os.environ.get("DJANGO_SECRET_KEY")
+        os.environ.pop("DJANGO_DEBUG", None)
+        os.environ.pop("DJANGO_SECRET_KEY", None)
+
+        try:
+            reloaded = importlib.reload(settings_module)
+            self.assertTrue(reloaded.DEBUG)
+            self.assertTrue(reloaded.SECRET_KEY)
+        finally:
+            if original_debug is None:
+                os.environ.pop("DJANGO_DEBUG", None)
+            else:
+                os.environ["DJANGO_DEBUG"] = original_debug
+            if original_secret is None:
+                os.environ.pop("DJANGO_SECRET_KEY", None)
+            else:
+                os.environ["DJANGO_SECRET_KEY"] = original_secret
+            importlib.reload(settings_module)
+
     def auth(self, username, role):
         self.client.post("/api/auth/register/", {"username": username, "password": "pass12345", "role": role}, format="json")
         r = self.client.post("/api/auth/login/", {"username": username, "password": "pass12345"}, format="json")

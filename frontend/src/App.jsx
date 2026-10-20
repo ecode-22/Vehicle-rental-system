@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useContext, createContext } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { BadgeCheck, CalendarDays, CarFront, CircleDollarSign, Clock3, Flag, MapPin, MapPinned, Plus, ShieldCheck, Star, ChevronLeft, ChevronRight } from "lucide-react";
+import { CarFront, Flag, MapPin, MapPinned, Star } from "lucide-react";
 import { api, clearSession } from "./services/api.js";
 import Modal from "./components/Modal.jsx";
 import MapView from "./components/MapView.jsx";
@@ -10,11 +10,9 @@ import RequestIndicator from "./components/RequestIndicator.jsx";
 import HomeDiscovery from "./pages/HomeDiscovery.jsx";
 import CarDetail from "./pages/CarDetail.jsx";
 import AuthPage from "./pages/AuthPage.jsx";
-import UserTrips from "./pages/UserTrips.jsx";
-import FleetAdminDashboard from "./pages/FleetAdminDashboard.jsx";
+import DashboardView from "./pages/DashboardView.jsx";
 import TrustAndSafety from "./pages/TrustAndSafety.jsx";
-import CheckoutWizard from "./pages/CheckoutWizard.jsx";
-import AvailabilityCalendar from "./components/AvailabilityCalendar.jsx";
+import HandoverUnavailable from "./pages/HandoverUnavailable.jsx";
 import "leaflet/dist/leaflet.css";
 
 /* ================= CONFIG & API ================= */
@@ -22,7 +20,6 @@ const CURRENCY = "R";
 const placeCache = new Map();
 
 const money = n => CURRENCY + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
-const todayStr = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
 async function locatePlace(place) {
   const normalizedPlace = place.trim().toLowerCase();
@@ -82,119 +79,7 @@ function LocationInput({ id, label, value, onChange, required = false, placehold
   );
 }
 
-/* ================= BROWSE CARS (user side) ================= */
-function CarDetailModal({ car, onClose, onDone }) {
-  const [s, setS] = useState(todayStr());
-  const [e, setE] = useState(todayStr());
-  const collectionPoint = car.collection_location || car.location;
-  const dropoffPoint = car.dropoff_location || car.location;
-  const [collection, setCollection] = useState(collectionPoint);
-  const [dropoff, setDropoff] = useState(dropoffPoint);
-  const [reviews, setReviews] = useState([]);
-  const [galleryIndex, setGalleryIndex] = useState(0);
-  const [mapPoints, setMapPoints] = useState([]);
-  const [blockedDates, setBlockedDates] = useState([]);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [checkoutStep, setCheckoutStep] = useState(0);
-  const days = Math.max(0, Math.round((new Date(e) - new Date(s)) / 864e5) + 1);
-  const photos = [...(car.photos || []).map(photo => photo.image), car.image, car.image_url].filter(Boolean);
-
-  useEffect(() => {
-    let active = true;
-    api(`/cars/${car.id}/reviews/`, { auth: false }).then(data => { if (active) setReviews(data); }).catch(() => {});
-    api(`/cars/${car.id}/availability/`, { auth: false }).then(ranges => {
-      if (!active) return;
-      const dates = ranges.flatMap(({ start_date, end_date }) => {
-        const current = new Date(`${start_date}T00:00:00`);
-        const last = new Date(`${end_date}T00:00:00`);
-        const blocked = [];
-        while (current <= last) {
-          blocked.push(`${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`);
-          current.setDate(current.getDate() + 1);
-        }
-        return blocked;
-      });
-      setBlockedDates(dates);
-    }).catch(() => {});
-    const collectionCoordinates = car.latitude != null && car.longitude != null ? [car.latitude, car.longitude] : null;
-    Promise.all([collectionCoordinates || locatePlace(collectionPoint), locatePlace(dropoffPoint)]).then(points => {
-      if (active) setMapPoints(points.filter(Boolean));
-    });
-    return () => { active = false; };
-  }, [car.id]);
-
-  const submit = async () => {
-    setErr(""); setBusy(true);
-    try {
-      await api("/bookings/", { method: "POST", body: { car: car.id, start_date: s, end_date: e, collection_location: collection, dropoff_location: dropoff } });
-      onDone();
-    } catch (ex) { setErr(ex.message); }
-    setBusy(false);
-  };
-
-  const advanceCheckout = event => {
-    event.preventDefault();
-    setErr("");
-    if (checkoutStep === 0 && (!s || !e || !days)) return setErr("Choose valid pick-up and return dates.");
-    if (checkoutStep === 1 && (!collection || !dropoff)) return setErr("Choose both handover points.");
-    if (checkoutStep < 2) return setCheckoutStep(checkoutStep + 1);
-    submit();
-  };
-
-  return (
-    <Modal title={`${car.year} ${car.make} ${car.model}`} onClose={onClose} className="vehicle-modal">
-      <div className="vehicle-detail">
-        <section className="vehicle-gallery" aria-label="Car photos">
-          <div className="gallery-main">
-            {photos.length ? <img src={photos[galleryIndex]} alt={`${car.year} ${car.make} ${car.model}, photo ${galleryIndex + 1}`} /> : <CarFront size={48} />}
-            {photos.length > 1 && <><button className="gallery-arrow previous" aria-label="Previous photo" onClick={() => setGalleryIndex((galleryIndex - 1 + photos.length) % photos.length)}><ChevronLeft size={20} /></button><button className="gallery-arrow next" aria-label="Next photo" onClick={() => setGalleryIndex((galleryIndex + 1) % photos.length)}><ChevronRight size={20} /></button><span className="gallery-count">{galleryIndex + 1} / {photos.length}</span></>}
-          </div>
-          {photos.length > 1 && <div className="gallery-thumbnails">{photos.map((photo, index) => <button type="button" key={`${photo}-${index}`} className={index === galleryIndex ? "active" : ""} onClick={() => setGalleryIndex(index)} aria-label={`View photo ${index + 1}`}><img src={photo} alt="" /></button>)}</div>}
-        </section>
-        <div className="vehicle-facts">
-          <div className="detail-price">{money(car.price_per_day)} <span>/ day</span></div>
-          <p className="sub">Listed by {car.owner_name} · {car.seats} seats · {car.transmission} · {car.fuel}</p>
-          <p>{car.description || "A well-presented car, ready for your next trip."}</p>
-          <div className="car-rating"><Star size={15} fill={car.rating_count ? "currentColor" : "none"} /><b>{car.rating_count ? Number(car.average_rating).toFixed(1) : "New"}</b><span>{car.rating_count ? `(${car.rating_count} verified rental review${car.rating_count === 1 ? "" : "s"})` : "No reviews yet"}</span></div>
-        </div>
-        <section className="handover-map-section">
-          <div className="section-heading"><div><span className="eyebrow">HANDOVER POINTS</span><h2>Collection and return</h2></div></div>
-          <div className="handover-points"><div><MapPin size={16} /><span><small>Collection</small>{collectionPoint}</span></div><div><MapPinned size={16} /><span><small>Drop-off</small>{dropoffPoint}</span></div></div>
-          {mapPoints.length > 0 && <MapView center={mapPoints[0]} markers={mapPoints.map((point, index) => ({ id: index, position: point, color: index ? "#f07b65" : "#48d3a3", popup: `${index ? "Drop-off" : "Collection"}: ${index ? dropoffPoint : collectionPoint}` }))} className="handover-map" />}
-          <p className="map-footnote">Map pins are approximate points for the selected towns or addresses, not live vehicle tracking.</p>
-        </section>
-        <section className="prebook-reviews">
-          <div className="section-heading"><div><span className="eyebrow">RENTER REVIEWS</span><h2>From previous customers</h2></div><span>{reviews.length} reviews</span></div>
-          {reviews.length ? <div className="review-list">{reviews.map(review => <article className="review-item" key={review.id}><div className="review-meta"><b>{review.reviewer_name}</b><span><Star size={13} fill="currentColor" /> {review.score}.0</span></div>{review.comment && <p>{review.comment}</p>}</article>)}</div> : <p className="sub">This car has not received a review yet.</p>}
-        </section>
-        <form className="booking-panel" onSubmit={advanceCheckout}>
-          <div className="section-heading"><div><span className="eyebrow">YOUR RESERVATION</span><h2>{["Choose your dates", "Set handover points", "Review your request"][checkoutStep]}</h2></div></div>
-          <CheckoutWizard steps={["Dates", "Handover", "Review"]} activeStep={checkoutStep} onStepChange={setCheckoutStep}>
-            {checkoutStep === 0 && <div className="two">
-              <div><label htmlFor="booking-start">Pick-up date</label><input id="booking-start" required type="date" min={todayStr()} value={s} onChange={x => setS(x.target.value)} /></div>
-              <div><label htmlFor="booking-end">Return date</label><input id="booking-end" required type="date" min={s} value={e} onChange={x => setE(x.target.value)} /></div>
-              <AvailabilityCalendar blockedDates={blockedDates} startDate={s} endDate={e} onSelect={date => {
-                if (s === e || date < s) { setS(date); setE(date); }
-                else setE(date);
-              }} />
-            </div>}
-            {checkoutStep === 1 && <div className="two">
-              <div><label>Collection point</label><select required value={collection} onChange={x => setCollection(x.target.value)}><option value={collectionPoint}>{collectionPoint}</option></select></div>
-              <div><label>Drop-off point</label><select required value={dropoff} onChange={x => setDropoff(x.target.value)}><option value={dropoffPoint}>{dropoffPoint}</option></select></div>
-            </div>}
-            {checkoutStep === 2 && <div className="checkout-summary"><b>{car.year} {car.make} {car.model}</b><span>{s} to {e} · {days} day{days === 1 ? "" : "s"}</span><span>Collection: {collection}</span><span>Return: {dropoff}</span><p>Payment and optional protection are not part of this request. The renter reviews your booking before it is confirmed.</p></div>}
-          </CheckoutWizard>
-          <div className="booking-total"><span>{money(car.price_per_day)} × {days} day{days === 1 ? "" : "s"}</span><b>{money(days * car.price_per_day)}</b></div>
-          {err && <div className="err">{err}</div>}
-          <div className="checkout-actions">{checkoutStep > 0 && <button type="button" className="btn ghost" onClick={() => setCheckoutStep(checkoutStep - 1)}>Back</button>}<button className="btn" style={{ flex: 1, marginTop: 8 }} disabled={busy || !days}>{busy ? "Sending request…" : checkoutStep === 2 ? "Request this car" : "Continue"}</button></div>
-          <p className="booking-assurance">Your booking is confirmed by the renter before it becomes final.</p>
-        </form>
-      </div>
-    </Modal>
-  );
-}
-
+/* ================= SHARED MODALS ================= */
 function ReviewModal({ booking, user, onClose, onDone }) {
   const [score, setScore] = useState(5);
   const [comment, setComment] = useState("");
@@ -381,130 +266,6 @@ function Fleet({ onChange }) {
   );
 }
 
-/* ================= DASHBOARD (both roles) ================= */
-function BookingsTable({ bookings, isRenter, act, reviews, backgroundChecks, onReview, onRequestCheck, onRespondCheck, onMap }) {
-  if (!bookings.length) return <div className="card empty">{isRenter ? "No booking requests yet." : "You haven't booked anything yet."}</div>;
-  return (
-    <div className="card tbl"><table>
-      <thead><tr><th>Car</th>{isRenter && <th>Customer</th>}<th>Dates</th><th>Handover</th><th>Total</th><th>Status</th><th></th></tr></thead>
-      <tbody>{bookings.map(b => (
-        <tr key={b.id}>
-          <td><b>{b.car_detail.make} {b.car_detail.model}</b></td>
-          {isRenter && <td>{b.customer_name}</td>}
-          <td>{b.start_date} → {b.end_date}</td>
-          <td className="booking-handover"><span><b>From</b> {b.collection_location}</span><span><b>To</b> {b.dropoff_location}</span><button className="link map-link" onClick={() => onMap(b)}><MapPinned size={14} /> Map</button></td>
-          <td>{money(b.total_price)}</td><td><StatusBadge status={b.status} /></td>
-          <td className="booking-actions">
-            {isRenter && b.status === "pending" && <><button className="btn ok sm" onClick={() => act(b.id, "confirm")}>Confirm</button>{" "}<button className="btn bad sm" onClick={() => act(b.id, "reject")}>Reject</button></>}
-            {isRenter && b.status === "confirmed" && <button className="btn ok sm" onClick={() => act(b.id, "complete")}>Mark complete</button>}
-            {isRenter && ["pending", "confirmed"].includes(b.status) && (() => {
-              const check = backgroundChecks.find(item => item.booking_id === b.id);
-              return check ? <span className={`check-status ${check.status}`}><ShieldCheck size={14} /> Consent {check.status}</span> : <button className="btn ghost sm" onClick={() => onRequestCheck(b)}><ShieldCheck size={14} /> Request consent</button>;
-            })()}
-            {!isRenter && ["pending", "confirmed"].includes(b.status) && <button className="btn ghost sm" onClick={() => act(b.id, "cancel")}>Cancel</button>}
-            {!isRenter && backgroundChecks.filter(item => item.booking_id === b.id && item.status === "requested").map(item => <span className="consent-actions" key={item.id}><button className="btn ok sm" onClick={() => onRespondCheck(item.id, "consented")}>Consent</button>{" "}<button className="btn ghost sm" onClick={() => onRespondCheck(item.id, "declined")}>Decline</button></span>)}
-            {b.status === "completed" && (() => {
-              const alreadyReviewed = reviews.some(item => item.booking_id === b.id && (isRenter ? item.target_user === b.customer : item.target_car === b.car));
-              return alreadyReviewed ? <span className="check-status completed"><Star size={14} /> Rated</span> : <button className="btn ghost sm" onClick={() => onReview(b)}><Star size={14} /> {isRenter ? "Rate customer" : "Rate car"}</button>;
-            })()}
-          </td>
-        </tr>))}</tbody>
-    </table></div>
-  );
-}
-
-function Dashboard({ user, go }) {
-  const location = useLocation();
-  const toast = useToast();
-  const isRenter = user.role === "renter";
-  const [d, setD] = useState(null);
-  const [bookings, setBookings] = useState([]);
-  const [reviews, setReviews] = useState([]);
-  const [backgroundChecks, setBackgroundChecks] = useState([]);
-  const [tab, setTab] = useState(location.pathname === "/admin/fleet" ? "fleet" : "bookings");
-  const [ratingBooking, setRatingBooking] = useState(null);
-  const [mapBooking, setMapBooking] = useState(null);
-
-  const load = useCallback(async () => {
-    try {
-      const [a, b, ownReviews, checks] = await Promise.all([api("/dashboard/"), api("/bookings/"), api("/reviews/"), api("/background-checks/")]);
-      setD(a); setBookings(b); setReviews(ownReviews); setBackgroundChecks(checks);
-    } catch (e) { toast(e.message, "err"); }
-  }, []);
-  useEffect(() => { load(); }, []);
-
-  useEffect(() => {
-    setTab(location.pathname === "/admin/fleet" ? "fleet" : "bookings");
-    const handoverId = location.pathname.match(/^\/bookings\/(\d+)\/handover$/)?.[1];
-    setMapBooking(handoverId ? bookings.find(booking => String(booking.id) === handoverId) || null : null);
-  }, [location.pathname, bookings]);
-
-  const act = async (id, a) => {
-    try { await api(`/bookings/${id}/${a}/`, { method: "POST" }); toast(`Booking ${a}${a.endsWith("e") ? "d" : "ed"}`); load(); }
-    catch (e) { toast(e.message, "err"); }
-  };
-  const requestCheck = async booking => {
-    try {
-      await api("/background-checks/", { method: "POST", body: { booking_id: booking.id } });
-      toast("Consent request sent to the customer"); load();
-    } catch (e) { toast(e.message, "err"); }
-  };
-  const respondCheck = async (id, decision) => {
-    try {
-      await api(`/background-checks/${id}/respond/`, { method: "POST", body: { decision } });
-      toast(decision === "consented" ? "Consent recorded" : "Request declined"); load();
-    } catch (e) { toast(e.message, "err"); }
-  };
-
-  const stats = !d ? [] : isRenter
-    ? [
-      { label: "Vehicles listed", value: d.total_cars, icon: CarFront, tone: "coral" },
-      { label: "Needs your attention", value: d.pending_requests, icon: Clock3, tone: "gold" },
-      { label: "Confirmed rentals", value: d.confirmed_bookings, icon: BadgeCheck, tone: "green" },
-      { label: "Rental revenue", value: money(d.revenue), icon: CircleDollarSign, tone: "blue" }
-    ]
-    : [
-      { label: "Total bookings", value: d.total_bookings, icon: CalendarDays, tone: "coral" },
-      { label: "Pending", value: d.pending, icon: Clock3, tone: "gold" },
-      { label: "Confirmed", value: d.confirmed, icon: BadgeCheck, tone: "green" },
-      { label: "Total spent", value: money(d.total_spent), icon: CircleDollarSign, tone: "blue" }
-    ];
-
-  return (
-    <main className="dashboard-page">
-      <header className="dashboard-hero">
-        <div>
-          <span className="eyebrow">{isRenter ? "OWNER WORKSPACE" : "YOUR DRIVE EASY ACCOUNT"}</span>
-          <h1>{isRenter ? "Your rental business, in view." : "Your journeys, in one place."}</h1>
-          <p>{isRenter ? `Welcome back, ${user.username}. Keep your fleet moving.` : `Welcome back, ${user.username}. Review your rental activity.`}</p>
-          {isRenter && d?.rating_count > 0 && <div className="owner-rating"><Star size={15} fill="currentColor" /> {Number(d.average_rating).toFixed(1)} <span>from {d.rating_count} customer rating{d.rating_count === 1 ? "" : "s"}</span></div>}
-        </div>
-        {isRenter && <button className="btn dashboard-add" onClick={() => go("fleet")}><Plus size={17} /> Add a vehicle</button>}
-      </header>
-      <section className="stats" aria-label="Account overview">
-        {stats.map(({ label, value, icon: Icon, tone }) => <article className="card stat" key={label}>
-          <span className={`stat-icon ${tone}`}><Icon size={19} /></span><span className="stat-label">{label}</span><b>{value}</b>
-        </article>)}
-      </section>
-      {isRenter && (
-        <div className="tabs dashboard-tabs" role="tablist" aria-label="Renter workspace">
-          <button role="tab" aria-selected={tab === "bookings"} className={tab === "bookings" ? "active" : ""} onClick={() => go("dashboard")}><CalendarDays size={17} /> Booking requests <span>{bookings.filter(b => b.status === "pending").length}</span></button>
-          <button role="tab" aria-selected={tab === "fleet"} className={tab === "fleet" ? "active" : ""} onClick={() => go("fleet")}><CarFront size={17} /> My fleet</button>
-        </div>
-      )}
-      {(!isRenter || tab === "bookings") ? (
-        <section className="dashboard-section">
-          <div className="section-heading"><div><span className="eyebrow">{isRenter ? "STAY ON TOP OF EVERY REQUEST" : "YOUR RESERVATIONS"}</span><h2>{isRenter ? "Booking requests" : "My bookings"}</h2></div><span>{bookings.length} total</span></div>
-          <BookingsTable bookings={bookings} isRenter={isRenter} act={act} reviews={reviews} backgroundChecks={backgroundChecks} onReview={setRatingBooking} onRequestCheck={requestCheck} onRespondCheck={respondCheck} onMap={booking => go(`/bookings/${booking.id}/handover`)} />
-          {isRenter && <p className="workflow-note"><ShieldCheck size={14} /> Screening consent is recorded here; an actual background check requires a connected screening provider.</p>}
-        </section>
-      ) : <Fleet onChange={load} />}
-      {ratingBooking && <ReviewModal booking={ratingBooking} user={user} onClose={() => setRatingBooking(null)} onDone={() => { setRatingBooking(null); toast("Rating submitted"); load(); }} />}
-      {mapBooking && <BookingMapModal booking={mapBooking} onClose={() => go("dashboard")} />}
-    </main>
-  );
-}
-
 /* ================= APP SHELL ================= */
 function App() {
   const navigate = useNavigate();
@@ -538,17 +299,18 @@ function App() {
   };
   const logout = () => { clearSession(); go("cars"); };
   const signIn = <AuthPage mode="login" go={go} onAuth={onAuth} />;
-  const tripsView = user ? <UserTrips DashboardView={Dashboard} user={user} go={go} /> : signIn;
-  const fleetView = user?.role === "renter" ? <FleetAdminDashboard DashboardView={Dashboard} user={user} go={go} /> : signIn;
+  const dashboardProps = { user, go, toast: show, Fleet, ReviewModal, BookingMapModal };
+  const tripsView = user ? <DashboardView {...dashboardProps} /> : signIn;
+  const fleetView = user?.role === "renter" ? <DashboardView {...dashboardProps} /> : signIn;
   const trustView = user ? <TrustAndSafety /> : signIn;
   const view = <Routes>
     <Route path="/" element={<HomeDiscovery user={user} go={go} toast={show} locatePlace={locatePlace} currency={CURRENCY} />} />
-    <Route path="/cars/:carId" element={<CarDetail DetailView={CarDetailModal} onBooked={() => show("Booking request sent to the renter")} />} />
+    <Route path="/cars/:carId" element={<CarDetail user={user} onBooked={() => show("Booking request sent to the renter")} />} />
     <Route path="/login" element={<AuthPage mode="login" go={go} onAuth={onAuth} />} />
     <Route path="/register" element={<AuthPage mode="register" go={go} onAuth={onAuth} />} />
     <Route path="/trips" element={tripsView} />
     <Route path="/admin/fleet" element={fleetView} />
-    <Route path="/bookings/:bookingId/handover" element={tripsView} />
+    <Route path="/bookings/:bookingId/handover" element={user ? <HandoverUnavailable /> : signIn} />
     <Route path="/trust" element={trustView} />
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>;
