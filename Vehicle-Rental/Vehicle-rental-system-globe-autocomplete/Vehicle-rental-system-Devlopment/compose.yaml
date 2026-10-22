@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    command: sh -c 'test -n "$$DATABASE_URL" || (echo "DATABASE_URL is missing; set it in backend/.env" >&2; exit 1); python manage.py migrate && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3'
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend,${HOST_IP:-localhost}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_CORS_ALLOWED_ORIGINS: http://${HOST_IP:-localhost},http://localhost,http://127.0.0.1
+    volumes:
+      - backend_media:/app/media
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    volumes:
+      - backend_media:/media:ro
+    depends_on:
+      - backend
+
+volumes:
+  backend_media:
