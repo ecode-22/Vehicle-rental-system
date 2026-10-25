@@ -10,13 +10,13 @@ function BookingsTable({ bookings, isRenter, act, reviews, backgroundChecks, onR
   if (!bookings.length) return <div className="card empty">{isRenter ? "No booking requests yet." : "You haven't booked anything yet."}</div>;
   return (
     <div className="card tbl"><table>
-      <thead><tr><th>Car</th>{isRenter && <th>Customer</th>}<th>Dates</th><th>Handover</th><th>Total</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Car</th>{isRenter && <th>Customer</th>}<th>Dates</th><th>Pick-up / drop-off</th><th>Total</th><th>Status</th><th></th></tr></thead>
       <tbody>{bookings.map(booking => (
         <tr key={booking.id}>
           <td><b>{booking.car_detail.make} {booking.car_detail.model}</b></td>
           {isRenter && <td>{booking.customer_name}</td>}
           <td>{booking.start_date} → {booking.end_date}</td>
-          <td className="booking-handover"><span><b>From</b> {booking.collection_location}</span><span><b>To</b> {booking.dropoff_location}</span><button className="link map-link" onClick={() => onMap(booking)}><MapPinned size={14} /> Map</button></td>
+          <td className="booking-handover"><span><b>Pick-up</b> {booking.collection_location || "Not provided"}</span><span><b>Drop-off</b> {booking.dropoff_location || "Not provided"}</span><button className="link map-link" onClick={() => onMap(booking)}><MapPinned size={14} /> Map</button></td>
           <td>{money(booking.total_price)}</td><td><StatusBadge status={booking.status} /></td>
           <td className="booking-actions">
             {isRenter && booking.status === "pending" && <><button className="btn ok sm" onClick={() => act(booking.id, "confirm")}>Confirm</button>{" "}<button className="btn bad sm" onClick={() => act(booking.id, "reject")}>Reject</button></>}

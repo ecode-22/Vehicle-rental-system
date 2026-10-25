@@ -1,4 +1,5 @@
-import { CarFront, MapPin, Star } from "lucide-react";
+import { CarFront, MapPin, Phone, Star } from "lucide-react";
+import { telHref } from "../services/contact.js";
 
 export default function VehicleCard({ car, distance, total, days, active = false, onHover, onBook }) {
   const image = car.photos?.[0]?.image || car.image || car.image_url;
@@ -8,7 +9,10 @@ export default function VehicleCard({ car, distance, total, days, active = false
       <div className="body">
         <div className="car-location"><MapPin size={14} />{car.location || "Location on request"}{distance != null && <span>{Math.round(distance)} km</span>}</div>
         <h3>{car.year} {car.make} {car.model}</h3>
-        <div className="car-owner">Listed by {car.owner_name}</div>
+        <div className="car-owner">
+          Listed by {car.owner_name}
+          {car.owner_contact?.phone && <> · <a className="car-contact" href={telHref(car.owner_contact.phone)} aria-label={`Call ${car.owner_name} on ${car.owner_contact.phone}`}><Phone size={11} aria-hidden="true" /> {car.owner_contact.phone}</a></>}
+        </div>
         <div className="car-rating" aria-label={car.rating_count ? `${Number(car.average_rating).toFixed(1)} out of 5 from ${car.rating_count} ratings` : "Not rated yet"}>
           <Star size={14} fill={car.rating_count ? "currentColor" : "none"} />
           <b>{car.rating_count ? Number(car.average_rating).toFixed(1) : "New"}</b>

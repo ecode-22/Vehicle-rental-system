@@ -8,8 +8,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         renter, _ = User.objects.get_or_create(username="renter1", defaults={"role": "renter", "email": "renter@example.com"})
+        renter.phone = "+27 82 555 0101"
         renter.set_password("demo12345"); renter.save()
         cust, _ = User.objects.get_or_create(username="customer1", defaults={"role": "customer", "email": "customer@example.com"})
+        cust.phone = "+27 82 555 0102"
         cust.set_password("demo12345"); cust.save()
         samples = [
             ("Toyota", "Corolla", 2022, 450, 5, "manual", "petrol", "Cape Town", -33.9249, 18.4241),

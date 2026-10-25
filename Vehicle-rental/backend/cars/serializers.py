@@ -1,7 +1,10 @@
-from decimal import Decimal, InvalidOperation
+import re
 from django.utils import timezone
 from rest_framework import serializers
 from .models import BackgroundCheckRequest, Booking, Car, CarPhoto, ProblemReport, Review
+
+PHONE_PATTERN = re.compile(r"^\+?[\d\s\-()]{7,20}$")
+_UNKNOWN = object()  # "this car was loaded without the booking annotation"
 
 
 class CarPhotoSerializer(serializers.ModelSerializer):
@@ -13,25 +16,46 @@ class CarPhotoSerializer(serializers.ModelSerializer):
 
 class CarSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.username", read_only=True)
+    # The owner's contact details are part of every ad, but only visible to signed-in users.
+    owner_contact = serializers.SerializerMethodField()
+    # active | booked | paused | removed (booked_until is set while a confirmed booking is running or upcoming)
+    status = serializers.SerializerMethodField()
+    booked_until = serializers.SerializerMethodField()
     average_rating = serializers.FloatField(read_only=True, allow_null=True)
     rating_count = serializers.IntegerField(read_only=True)
     photos = CarPhotoSerializer(many=True, read_only=True)
-    collection_location = serializers.CharField(required=True, allow_blank=False)
-    dropoff_location = serializers.CharField(required=True, allow_blank=False)
+    # Where the car is. Customers choose their own pick-up and drop-off when they book.
+    location = serializers.CharField(required=True, allow_blank=False, max_length=180)
     latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
     longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
+    # Saved on the owner's profile so it appears on every one of their ads.
+    contact_phone = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=30)
 
     class Meta:
         model = Car
         fields = "__all__"
-        read_only_fields = ["owner", "created_at", "is_archived"]
+        read_only_fields = ["owner", "created_at", "is_archived", "available"]
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        fallback = instance.location
-        data["collection_location"] = data["collection_location"] or fallback
-        data["dropoff_location"] = data["dropoff_location"] or fallback
-        return data
+    def get_owner_contact(self, obj):
+        request = self.context.get("request")
+        if not (request and request.user.is_authenticated):
+            return None
+        owner = obj.owner
+        return {"name": owner.get_full_name() or owner.username, "phone": owner.phone, "email": owner.email}
+
+    def get_booked_until(self, obj):
+        end = getattr(obj, "active_booking_end", _UNKNOWN)
+        return None if end is _UNKNOWN else end
+
+    def get_status(self, obj):
+        if obj.is_archived:
+            return "removed"
+        if not obj.available:
+            return "paused"
+        end = getattr(obj, "active_booking_end", _UNKNOWN)
+        if end is _UNKNOWN:
+            return None
+        return "booked" if end else "active"
 
     def validate_image(self, value):
         if value and value.size > 8 * 1024 * 1024:
@@ -45,14 +69,39 @@ class CarSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"photos": "A car can have up to 10 photos."})
         if any(image.size > 8 * 1024 * 1024 for image in uploads):
             raise serializers.ValidationError({"photos": "Each photo must be 8 MB or smaller."})
+
         latitude = data.get("latitude", self.instance.latitude if self.instance else None)
         longitude = data.get("longitude", self.instance.longitude if self.instance else None)
         if (latitude is None) != (longitude is None):
             raise serializers.ValidationError({"latitude": "Latitude and longitude must be provided together."})
-        location = data.get("location")
-        if not location and data.get("collection_location"):
-            data["location"] = data["collection_location"]
+        # A listed car must be on the map, so its location has to be a real place.
+        if latitude is None and (self.instance is None or any(key in data for key in ("location", "latitude", "longitude"))):
+            raise serializers.ValidationError({"location": "Pick the car's location from the suggestions so it appears on the map."})
+
+        user = self.context["request"].user
+        phone = (data.pop("contact_phone", "") or "").strip() or (user.phone or "").strip()
+        if not phone:
+            raise serializers.ValidationError({"contact_phone": "Add a contact phone number so customers can reach you about this car."})
+        if not PHONE_PATTERN.match(phone):
+            raise serializers.ValidationError({"contact_phone": "Enter a valid phone number, for example 082 123 4567."})
+        self._contact_phone = phone
         return data
+
+    def _save_contact_phone(self):
+        user = self.context["request"].user
+        if user.phone != self._contact_phone:
+            user.phone = self._contact_phone
+            user.save(update_fields=["phone"])
+
+    def create(self, validated):
+        car = super().create(validated)
+        self._save_contact_phone()
+        return car
+
+    def update(self, instance, validated):
+        car = super().update(instance, validated)
+        self._save_contact_phone()
+        return car
 
 
 class ReviewSerializer(serializers.ModelSerializer):
@@ -135,20 +184,23 @@ class BackgroundCheckRequestSerializer(serializers.ModelSerializer):
 class BookingSerializer(serializers.ModelSerializer):
     car_detail = CarSerializer(source="car", read_only=True)
     customer_name = serializers.CharField(source="customer.username", read_only=True)
+    # The customer decides where they collect and return the car.
+    collection_location = serializers.CharField(required=True, allow_blank=False, max_length=180)
+    collection_latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    collection_longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
+    dropoff_location = serializers.CharField(required=True, allow_blank=False, max_length=180)
+    dropoff_latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    dropoff_longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
 
     class Meta:
         model = Booking
-        fields = ["id", "car", "car_detail", "customer", "customer_name", "start_date", "end_date", "collection_location", "dropoff_location", "total_price", "status", "created_at"]
+        fields = [
+            "id", "car", "car_detail", "customer", "customer_name", "start_date", "end_date",
+            "collection_location", "collection_latitude", "collection_longitude",
+            "dropoff_location", "dropoff_latitude", "dropoff_longitude",
+            "total_price", "status", "created_at",
+        ]
         read_only_fields = ["customer", "total_price", "status", "created_at"]
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data["collection_location"] = data["collection_location"] or instance.car.collection_location or instance.car.location
-        data["dropoff_location"] = data["dropoff_location"] or instance.car.dropoff_location or instance.car.location
-        return data
-
-    collection_location = serializers.CharField(required=True, allow_blank=False)
-    dropoff_location = serializers.CharField(required=True, allow_blank=False)
 
     def validate(self, data):
         start, end, car = data["start_date"], data["end_date"], data["car"]
@@ -156,14 +208,18 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("End date must be on or after start date.")
         if start < timezone.localdate():
             raise serializers.ValidationError("Start date cannot be in the past.")
+        if car.is_archived:
+            raise serializers.ValidationError("This car is no longer listed.")
         if not car.available:
-            raise serializers.ValidationError("This car is not available.")
-        if data["collection_location"] != (car.collection_location or car.location):
-            raise serializers.ValidationError({"collection_location": "Choose the collection point listed for this car."})
-        if data["dropoff_location"] != (car.dropoff_location or car.location):
-            raise serializers.ValidationError({"dropoff_location": "Choose the drop-off point listed for this car."})
-        if Booking.overlapping(car, start, end).exists():
-            raise serializers.ValidationError("Car is already booked for those dates.")
+            raise serializers.ValidationError("This car is paused for maintenance and can't be booked right now.")
+        # A car with a confirmed booking that is running or upcoming is off the market (no double booking).
+        booked_until = car.booked_until()
+        if booked_until:
+            raise serializers.ValidationError(f"This car is already booked until {booked_until:%d %b %Y}.")
+        for prefix, label in (("collection", "pick-up"), ("dropoff", "drop-off")):
+            lat, lng = data.get(f"{prefix}_latitude"), data.get(f"{prefix}_longitude")
+            if (lat is None) != (lng is None):
+                raise serializers.ValidationError({f"{prefix}_location": f"The {label} point needs both a latitude and a longitude."})
         return data
 
     def create(self, validated):

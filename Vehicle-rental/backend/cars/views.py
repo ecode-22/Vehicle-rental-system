@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Avg, Count, Sum, Q
+from django.db.models import Avg, Count, OuterRef, Subquery, Sum, Q
 from django.utils import timezone
 from rest_framework import viewsets, permissions, serializers, status
 from rest_framework.decorators import action
@@ -11,12 +11,18 @@ from .serializers import BackgroundCheckRequestSerializer, CarPhotoSerializer, C
 from .permissions import IsRenterOrReadOnly
 
 
+def with_booking_state(queryset):
+    """Adds `active_booking_end`: the end date of a confirmed booking that is running or upcoming (else NULL)."""
+    active = Booking.objects.filter(car=OuterRef("pk"), status=Booking.CONFIRMED, end_date__gte=timezone.localdate())
+    return queryset.annotate(active_booking_end=Subquery(active.order_by("-end_date").values("end_date")[:1]))
+
+
 class CarViewSet(viewsets.ModelViewSet):
     serializer_class = CarSerializer
     permission_classes = [IsRenterOrReadOnly]
 
     def get_queryset(self):
-        qs = Car.objects.select_related("owner").prefetch_related("photos").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
+        qs = with_booking_state(Car.objects.select_related("owner").prefetch_related("photos").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews")))
         p = self.request.query_params
         start_value, end_value = p.get("start_date"), p.get("end_date")
         if bool(start_value) != bool(end_value):
@@ -45,12 +51,15 @@ class CarViewSet(viewsets.ModelViewSet):
             qs = qs.filter(fuel=p["fuel"])
         if self.action != "mine":
             qs = qs.filter(is_archived=False)
-        if self.action == "list" and p.get("all") != "1":
-            qs = qs.filter(available=True)
+        if self.action == "list":
+            # The discovery board only shows cars that can be booked right now: not paused for maintenance
+            # and not already booked. (Direct links to a car still load, so its page can say why.)
+            qs = qs.filter(available=True, active_booking_end__isnull=True)
         return qs
 
     def perform_create(self, serializer):
         car = serializer.save(owner=self.request.user)
+        car.active_booking_end = None  # a brand-new car cannot be booked yet
         self._save_photos(car)
 
     def perform_update(self, serializer):
@@ -64,8 +73,24 @@ class CarViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, permission_classes=[permissions.IsAuthenticated])
     def mine(self, request):
-        cars = Car.objects.filter(owner=request.user).select_related("owner").prefetch_related("photos").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews"))
-        return Response(CarSerializer(cars, many=True).data)
+        cars = with_booking_state(Car.objects.filter(owner=request.user).select_related("owner").prefetch_related("photos").annotate(average_rating=Avg("reviews__score"), rating_count=Count("reviews")))
+        return Response(CarSerializer(cars, many=True, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"])
+    def pause(self, request, pk=None):
+        """Owner pauses a car (e.g. for maintenance): it leaves the discovery board and cannot be booked."""
+        car = self.get_object()
+        car.available = False
+        car.save(update_fields=["available"])
+        return Response(CarSerializer(car, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"])
+    def resume(self, request, pk=None):
+        """Owner puts a paused car back on the market."""
+        car = self.get_object()
+        car.available = True
+        car.save(update_fields=["available"])
+        return Response(CarSerializer(car, context={"request": request}).data)
 
     def perform_destroy(self, instance):
         instance.available = False
@@ -108,8 +133,10 @@ class BookingViewSet(viewsets.ModelViewSet):
             b = Booking.objects.select_for_update().get(pk=b.pk)
             if request.user.role != "renter" or b.car.owner_id != request.user.id or b.status != Booking.PENDING:
                 return Response({"detail": "Not allowed."}, status=403)
-            if b.car.is_archived or not b.car.available:
-                return Response({"detail": "This car is no longer available."}, status=400)
+            if b.car.is_archived:
+                return Response({"detail": "This car has been removed from your fleet."}, status=400)
+            if not b.car.available:
+                return Response({"detail": "This car is paused for maintenance. Resume it before confirming bookings."}, status=400)
             if Booking.overlapping(b.car, b.start_date, b.end_date, b.id).exists():
                 return Response({"detail": "Dates conflict with a confirmed booking."}, status=400)
             b.status = Booking.CONFIRMED
@@ -161,7 +188,7 @@ class DashboardView(APIView):
             rating = Review.objects.filter(target_user=u).aggregate(average=Avg("score"), count=Count("id"))
             return Response({
                 "role": "renter",
-                "total_cars": Car.objects.filter(owner=u).count(),
+                "total_cars": Car.objects.filter(owner=u, is_archived=False).count(),
                 "pending_requests": bookings.filter(status="pending").count(),
                 "confirmed_bookings": bookings.filter(status="confirmed").count(),
                 "revenue": revenue,

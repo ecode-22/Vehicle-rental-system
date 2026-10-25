@@ -335,3 +335,49 @@ table td{border-color:var(--line)}
   top: 0;
   left: 0;
 }
+
+/* ===== Modals always fit the screen: header and footer stay in view, only the body scrolls ===== */
+.modal{display:flex;flex-direction:column;padding:0;overflow:hidden;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px)}
+.modal-heading{flex:none;margin:0;padding:18px 22px 12px}
+.modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 22px 22px}
+.modal-footer{flex:none;padding:12px 22px 16px;border-top:1px solid var(--line);background:var(--surface-raised)}
+.modal-footer .err{margin:0 0 10px}
+.car-form-modal{max-width:780px}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:2px 12px}
+.form-grid>div{min-width:0}
+.form-grid.two-up{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.form-section{display:flex;align-items:baseline;gap:8px;margin:22px 0 2px;font-family:Manrope,sans-serif;font-size:14px}
+.form-section span{font-family:'DM Sans',sans-serif;font-size:11px;font-weight:500;color:var(--muted)}
+.field-hint{margin:6px 0 0;font-size:11px;line-height:1.5;color:var(--muted)}
+input:disabled{opacity:.7;cursor:not-allowed}
+
+/* ===== Car status (fleet table) ===== */
+.badge.active{color:var(--ok);background:rgba(98,213,162,.13)}
+.badge.paused{color:var(--warn);background:rgba(241,196,108,.14)}
+.badge.booked{color:#4f9bc4;background:rgba(79,155,196,.14)}
+.badge.removed{color:var(--bad);background:rgba(255,136,119,.12)}
+.status-note{margin:4px 0 0;font-size:11px}
+.fleet-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center}
+
+/* ===== Owner contact and booking form on the car page ===== */
+.car-contact{color:var(--brand);font-weight:600;text-decoration:none;white-space:nowrap}
+.car-contact:hover{text-decoration:underline}
+.car-contact svg{vertical-align:-1px}
+.contact-card{display:grid;gap:10px;padding:14px;background:var(--surface-raised);border:1px solid var(--line);border-radius:6px}
+.contact-links{display:flex;flex-wrap:wrap;gap:8px}
+.contact-links .btn{text-decoration:none}
+.booking-fields{border:0;margin:0;padding:0;min-width:0}
+.booking-fields:disabled{opacity:.55}
+.check-row{display:flex;align-items:center;gap:8px;margin:10px 0 0;color:var(--text);font-size:12px;cursor:pointer}
+.check-row input{width:auto}
+.car-unavailable{display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;padding:10px 12px;border:1px solid rgba(241,196,108,.4);border-radius:5px;background:rgba(241,196,108,.12);color:var(--text);font-size:12px;line-height:1.5}
+.car-unavailable svg{flex:none;margin-top:2px;color:var(--warn)}
+.detail-map{height:260px;width:100%;border-radius:6px}
+.handover-points.single{grid-template-columns:1fr}
+.handover-points.three{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+@media(max-width:800px){
+  /* the booking form now has place fields, so it scrolls with the page instead of sticking to the bottom */
+  .car-booking-sticky{position:static;margin:0;padding:0;background:none;border-top:0}
+  .car-booking-card .booking-fields{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  .car-booking-card .booking-fields .location-picker,.car-booking-card .booking-fields .check-row{grid-column:1/-1}
+}

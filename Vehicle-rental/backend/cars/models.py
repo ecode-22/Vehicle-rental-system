@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class Car(models.Model):
@@ -11,14 +12,14 @@ class Car(models.Model):
     seats = models.PositiveSmallIntegerField(default=5)
     transmission = models.CharField(max_length=10, choices=[("manual", "Manual"), ("auto", "Automatic")], default="manual")
     fuel = models.CharField(max_length=10, choices=[("petrol", "Petrol"), ("diesel", "Diesel"), ("electric", "Electric"), ("hybrid", "Hybrid")], default="petrol")
-    location = models.CharField(max_length=100, blank=True)
-    collection_location = models.CharField(max_length=180, blank=True)
-    dropoff_location = models.CharField(max_length=180, blank=True)
+    # Where the car is kept (set by the owner). Customers choose their own pick-up and drop-off per booking.
+    location = models.CharField(max_length=180, blank=True)
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     image_url = models.URLField(blank=True)
     image = models.ImageField(upload_to="cars/", blank=True, null=True)
     description = models.TextField(blank=True)
+    # available=False means the owner paused the car (e.g. maintenance): it is hidden and cannot be booked.
     available = models.BooleanField(default=True)
     is_archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -28,6 +29,13 @@ class Car(models.Model):
 
     def __str__(self):
         return f"{self.year} {self.make} {self.model}"
+
+    def booked_until(self):
+        """End date of a confirmed booking that is running now or is still to come, else None."""
+        return (
+            self.bookings.filter(status=Booking.CONFIRMED, end_date__gte=timezone.localdate())
+            .order_by("-end_date").values_list("end_date", flat=True).first()
+        )
 
 
 class CarPhoto(models.Model):
@@ -47,8 +55,13 @@ class Booking(models.Model):
     customer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bookings")
     start_date = models.DateField()
     end_date = models.DateField()
+    # Chosen by the customer when booking
     collection_location = models.CharField(max_length=180, blank=True)
+    collection_latitude = models.FloatField(null=True, blank=True)
+    collection_longitude = models.FloatField(null=True, blank=True)
     dropoff_location = models.CharField(max_length=180, blank=True)
+    dropoff_latitude = models.FloatField(null=True, blank=True)
+    dropoff_longitude = models.FloatField(null=True, blank=True)
     total_price = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=10, choices=STATUSES, default=PENDING)
     created_at = models.DateTimeField(auto_now_add=True)

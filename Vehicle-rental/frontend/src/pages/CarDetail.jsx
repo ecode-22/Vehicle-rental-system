@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { CarFront, ChevronLeft, ChevronRight, MapPin, ShieldCheck, Star } from "lucide-react";
+import { CarFront, ChevronLeft, ChevronRight, Mail, MapPin, MessageCircle, Phone, ShieldCheck, Star, TriangleAlert } from "lucide-react";
 import { api } from "../services/api.js";
+import { telHref, whatsappHref } from "../services/contact.js";
+import { readPickupSearch } from "../services/pickup.js";
 import AvailabilityCalendar from "../components/AvailabilityCalendar.jsx";
+import LocationInput from "../components/LocationInput.jsx";
+import MapView from "../components/MapView.jsx";
 import SkeletonLoader from "../components/SkeletonLoader.jsx";
 
 const money = value => `R${Number(value || 0).toLocaleString("en-ZA", { maximumFractionDigits: 2 })}`;
+const longDate = value => new Date(`${value}T00:00:00`).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
 export default function CarDetail({ user, onBooked }) {
@@ -19,6 +24,10 @@ export default function CarDetail({ user, onBooked }) {
   const [blockedDates, setBlockedDates] = useState([]);
   const [busy, setBusy] = useState(false);
   const [requestError, setRequestError] = useState("");
+  // The customer decides where they collect and return the car. A place searched on the home page is suggested.
+  const [pickup, setPickup] = useState(() => { const saved = readPickupSearch(); return { text: saved?.label || "", coords: saved?.coordinates || null }; });
+  const [dropoff, setDropoff] = useState({ text: "", coords: null });
+  const [sameReturn, setSameReturn] = useState(true);
 
   const photos = car ? [...(car.photos || []).map(photo => photo.image), car.image, car.image_url].filter(Boolean) : [];
   const days = Math.max(1, Math.round((new Date(`${endDate}T00:00:00`) - new Date(`${startDate}T00:00:00`)) / 864e5) + 1);
@@ -28,7 +37,7 @@ export default function CarDetail({ user, onBooked }) {
     setCar(null);
     setError("");
     setPhotosIndex(0);
-    api(`/cars/${carId}/`, { auth: false })
+    api(`/cars/${carId}/`) // signed-in users also get the owner's contact details
       .then(result => { if (active) setCar(result); })
       .catch(() => { if (active) setError("This car isn't available. It may have been removed or is no longer listed."); });
     return () => { active = false; };
@@ -64,12 +73,17 @@ export default function CarDetail({ user, onBooked }) {
     setRequestError("");
     setBusy(true);
     try {
+      const returnTo = sameReturn ? pickup : dropoff;
       await api("/bookings/", { method: "POST", body: {
         car: car.id,
         start_date: startDate,
         end_date: endDate,
-        collection_location: car.collection_location || car.location,
-        dropoff_location: car.dropoff_location || car.location,
+        collection_location: pickup.text.trim(),
+        collection_latitude: pickup.coords?.[0] ?? null,
+        collection_longitude: pickup.coords?.[1] ?? null,
+        dropoff_location: returnTo.text.trim(),
+        dropoff_latitude: returnTo.coords?.[0] ?? null,
+        dropoff_longitude: returnTo.coords?.[1] ?? null,
       } });
       onBooked();
       navigate("/trips");
@@ -82,6 +96,13 @@ export default function CarDetail({ user, onBooked }) {
 
   if (error) return <main className="page-state"><span className="eyebrow">VEHICLE LISTING</span><h1>Vehicle unavailable</h1><p className="sub">{error}</p><button className="btn" onClick={() => navigate("/")}>Back to discovery</button></main>;
   if (!car) return <main className="page-state"><SkeletonLoader count={1} /></main>;
+
+  const hasPoint = car.latitude != null && car.longitude != null;
+  const contact = car.owner_contact;
+  const unavailable = car.status === "paused" || car.status === "booked";
+  const unavailableText = car.status === "paused"
+    ? "This car is paused for maintenance right now, so it can't be booked."
+    : car.status === "booked" ? `This car is already booked until ${longDate(car.booked_until)}.` : "";
 
   return (
     <main className="car-detail-page">
@@ -106,8 +127,24 @@ export default function CarDetail({ user, onBooked }) {
             <p className="owner-trust"><ShieldCheck size={17} /> Listed by {car.owner_name} <span>·</span> Cancellation terms are confirmed with the renter</p>
           </section>
           <section className="car-detail-section">
-            <h2>Collection and drop-off</h2>
-            <div className="handover-points"><div><MapPin size={16} /><span><small>Collection</small>{car.collection_location || car.location || "To be agreed"}</span></div><div><MapPin size={16} /><span><small>Drop-off</small>{car.dropoff_location || car.location || "To be agreed"}</span></div></div>
+            <h2>Where the car is</h2>
+            <div className="handover-points single"><div><MapPin size={16} /><span><small>Car location</small>{car.location || "Location on request"}</span></div></div>
+            {hasPoint && <MapView center={[car.latitude, car.longitude]} className="detail-map" markers={[{ id: car.id, position: [car.latitude, car.longitude], color: "#f07b65", popup: <><b>{car.year} {car.make} {car.model}</b><br />{car.location}</> }]} />}
+            <p className="map-footnote">You choose where to collect and return the car when you request it. Pins show the place the owner gave, not an exact address.</p>
+          </section>
+          <section className="car-detail-section">
+            <h2>Contact the owner</h2>
+            {contact ? (
+              <div className="contact-card">
+                <b>{contact.name}</b>
+                <div className="contact-links">
+                  {contact.phone && <a className="btn ghost sm" href={telHref(contact.phone)}><Phone size={14} /> {contact.phone}</a>}
+                  {contact.phone && whatsappHref(contact.phone) && <a className="btn ghost sm" href={whatsappHref(contact.phone)} target="_blank" rel="noreferrer"><MessageCircle size={14} /> WhatsApp</a>}
+                  {contact.email && <a className="btn ghost sm" href={`mailto:${contact.email}`}><Mail size={14} /> {contact.email}</a>}
+                  {!contact.phone && !contact.email && <span className="sub" style={{ margin: 0 }}>This owner hasn't added contact details yet.</span>}
+                </div>
+              </div>
+            ) : <p className="sub">Log in to see how to contact {car.owner_name}.</p>}
           </section>
           <section className="car-detail-section car-calendar-section">
             <h2>Availability</h2>
@@ -119,11 +156,17 @@ export default function CarDetail({ user, onBooked }) {
           <form className="car-booking-card" onSubmit={submitBooking}>
             <div className="detail-price">{money(car.price_per_day)} <span>/ day</span></div>
             <p className="sub">Request this car from its renter</p>
-            <label htmlFor="car-pickup">Pick-up date</label><input id="car-pickup" type="date" min={today()} value={startDate} onChange={event => { setStartDate(event.target.value); if (event.target.value > endDate) setEndDate(event.target.value); }} required />
-            <label htmlFor="car-return">Return date</label><input id="car-return" type="date" min={startDate} value={endDate} onChange={event => setEndDate(event.target.value)} required />
+            {unavailable && <div className="car-unavailable" role="status"><TriangleAlert size={15} aria-hidden="true" /><span>{unavailableText}</span></div>}
+            <fieldset className="booking-fields" disabled={unavailable || busy}>
+              <label htmlFor="car-pickup">Pick-up date</label><input id="car-pickup" type="date" min={today()} value={startDate} onChange={event => { setStartDate(event.target.value); if (event.target.value > endDate) setEndDate(event.target.value); }} required />
+              <label htmlFor="car-return">Return date</label><input id="car-return" type="date" min={startDate} value={endDate} onChange={event => setEndDate(event.target.value)} required />
+              <LocationInput id="trip-pickup" className="trip-place" label="Where will you collect it? *" required value={pickup.text} placeholder="Your pick-up place" onChange={(text, coords) => setPickup({ text, coords })} />
+              <label className="check-row"><input type="checkbox" checked={sameReturn} onChange={event => setSameReturn(event.target.checked)} /> I'll return it to the same place</label>
+              {!sameReturn && <LocationInput id="trip-dropoff" className="trip-place" label="Where will you return it? *" required value={dropoff.text} placeholder="Your drop-off place" onChange={(text, coords) => setDropoff({ text, coords })} />}
+            </fieldset>
             <div className="booking-total"><span>{money(car.price_per_day)} × {days} day{days === 1 ? "" : "s"}</span><b>{money(days * Number(car.price_per_day))}</b></div>
             {requestError && <div className="err">{requestError}</div>}
-            {user?.role === "customer" ? <button className="btn car-book-button" disabled={busy || blockedDates.some(date => date >= startDate && date <= endDate)}>{busy ? "Sending request…" : "Request to book"}</button> : <button type="button" className="btn car-book-button" onClick={() => navigate(user ? "/" : "/login")}>{user ? "Owners cannot book cars" : "Log in to request"}</button>}
+            {user?.role === "customer" ? <button className="btn car-book-button" disabled={busy || unavailable || blockedDates.some(date => date >= startDate && date <= endDate)}>{busy ? "Sending request…" : unavailable ? "Not available to book" : "Request to book"}</button> : <button type="button" className="btn car-book-button" onClick={() => navigate(user ? "/" : "/login")}>{user ? "Owners cannot book cars" : "Log in to request"}</button>}
             <p className="booking-assurance">No payment is taken now. The renter must approve your request.</p>
           </form>
         </aside>

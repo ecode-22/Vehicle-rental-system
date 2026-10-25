@@ -76,6 +76,14 @@ Node.js or Django.
 
 Two roles: **customer** (browse & book cars) and **renter** (list cars, approve/reject bookings, dashboard).
 
+#### How renting works
+
+- **The renter only says where the car is.** When adding a car they pick its location from the suggestions, so it appears on the map. They also give a contact phone number (saved on their profile).
+- **The customer chooses pick-up and drop-off.** When requesting a car they enter where they will collect it and where they will return it (the same place, or a different one). The renter sees those points, and a map of them, on the booking.
+- **Every ad shows the renter's contact details** (name, phone, email) to signed-in users. Visitors who are not signed in can browse but are asked to log in to see them.
+- **Pause for maintenance.** A renter can pause a car from *My fleet*. A paused car leaves the discovery board and cannot be booked until it is resumed. Bookings already confirmed are not cancelled.
+- **No double booking.** A car with a confirmed booking that is running or still to come is taken off the discovery board and refuses new requests. It returns when that booking ends or is cancelled. When a renter confirms one request, other overlapping pending requests are rejected automatically.
+
 
 ### Connect Django to Supabase PostgreSQL
 

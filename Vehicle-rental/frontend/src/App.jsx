@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useContext, createContext } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { CarFront, Flag, MapPin, MapPinned, Star } from "lucide-react";
+import { CarFront, Flag, MapPin, MapPinned, Play, Star, Wrench } from "lucide-react";
 import { api, clearSession } from "./services/api.js";
 import { locatePlace } from "./services/geocode.js";
 import Modal from "./components/Modal.jsx";
@@ -83,39 +83,60 @@ function ReportModal({ car, onClose, onDone }) {
   );
 }
 
+const hasPoint = (latitude, longitude) => latitude != null && longitude != null;
+
 function BookingMapModal({ booking, onClose }) {
   const [points, setPoints] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  const car = booking.car_detail;
   useEffect(() => {
     let active = true;
-    const car = booking.car_detail;
-    const collectionCoordinates = car.latitude != null && car.longitude != null ? [car.latitude, car.longitude] : null;
-    Promise.all([collectionCoordinates || locatePlace(booking.collection_location), locatePlace(booking.dropoff_location)]).then(result => {
-      if (active) { setPoints(result.filter(Boolean)); setLoaded(true); }
+    const stops = [
+      { label: "Car location", color: "#f7c66b", text: car.location, point: hasPoint(car.latitude, car.longitude) ? [car.latitude, car.longitude] : null },
+      { label: "Customer pick-up", color: "#48d3a3", text: booking.collection_location, point: hasPoint(booking.collection_latitude, booking.collection_longitude) ? [booking.collection_latitude, booking.collection_longitude] : null },
+      { label: "Customer drop-off", color: "#f07b65", text: booking.dropoff_location, point: hasPoint(booking.dropoff_latitude, booking.dropoff_longitude) ? [booking.dropoff_latitude, booking.dropoff_longitude] : null }
+    ];
+    // Points picked from the suggestions are exact; anything typed by hand is looked up.
+    Promise.all(stops.map(stop => stop.point || (stop.text ? locatePlace(stop.text) : null))).then(found => {
+      if (active) { setPoints(stops.map((stop, index) => ({ ...stop, point: found[index] })).filter(stop => stop.point)); setLoaded(true); }
     });
     return () => { active = false; };
   }, [booking.id]);
   return (
-    <Modal title={`${booking.car_detail.make} ${booking.car_detail.model} · Handover map`} onClose={onClose} className="handover-modal">
-      <div className="handover-points"><div><MapPin size={16} /><span><small>Collection</small>{booking.collection_location}</span></div><div><MapPinned size={16} /><span><small>Drop-off</small>{booking.dropoff_location}</span></div></div>
-      {points.length > 0 ? <MapView center={points[0]} markers={points.map((point, index) => ({ id: index, position: point, color: index ? "#f07b65" : "#48d3a3", popup: index ? "Drop-off" : "Collection" }))} className="handover-map" /> : <div className="empty">{loaded ? "We could not map one or both handover points." : "Loading map locations…"}</div>}
-      <p className="map-footnote">Pins are approximate geocoded handover points. Live vehicle tracking requires compatible GPS hardware and renter consent.</p>
+    <Modal title={`${car.make} ${car.model} · Handover map`} onClose={onClose} className="handover-modal">
+      <div className="handover-points three">
+        <div><MapPin size={16} /><span><small>Car is at</small>{car.location || "—"}</span></div>
+        <div><MapPin size={16} /><span><small>Customer pick-up</small>{booking.collection_location || "Not provided"}</span></div>
+        <div><MapPinned size={16} /><span><small>Customer drop-off</small>{booking.dropoff_location || "Not provided"}</span></div>
+      </div>
+      {points.length > 0 ? <MapView center={points[0].point} markers={points.map((stop, index) => ({ id: index, position: stop.point, color: stop.color, popup: stop.label }))} className="handover-map" /> : <div className="empty">{loaded ? "We could not map these points." : "Loading map locations…"}</div>}
+      <p className="map-footnote">Pins use the exact spot picked from the suggestions. Places typed by hand are approximate. Live vehicle tracking requires compatible GPS hardware and renter consent.</p>
     </Modal>
   );
 }
 
 /* ================= RENTER: FLEET ================= */
-const blankCar = { make: "", model: "", year: new Date().getFullYear(), price_per_day: "", seats: 5, transmission: "manual", fuel: "petrol", location: "", collection_location: "", dropoff_location: "", latitude: null, longitude: null, image_url: "", description: "", available: true };
+// The owner only says where the car is. Customers choose their own pick-up and drop-off when they book.
+const blankCar = { make: "", model: "", year: new Date().getFullYear(), price_per_day: "", seats: 5, transmission: "manual", fuel: "petrol", location: "", latitude: null, longitude: null, image_url: "", description: "" };
+const STATUS_LABEL = { active: "Active", booked: "Booked", paused: "Paused", removed: "Removed" };
 
 function CarForm({ car, onClose, onSaved }) {
   const [f, setF] = useState(car || blankCar);
+  const [phone, setPhone] = useState(car?.owner_contact?.phone || "");
+  const [email, setEmail] = useState(car?.owner_contact?.email || "");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [imageFiles, setImageFiles] = useState([]);
   const [newPreviews, setNewPreviews] = useState([]);
   const oldPhotos = [...(car?.photos || []).map(photo => photo.image), car?.image, car?.image_url].filter(Boolean);
-  const fValue = { ...f, collection_location: f.collection_location ?? car?.location ?? "", dropoff_location: f.dropoff_location ?? car?.location ?? "" };
-  const set = k => e => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const set = k => e => setF({ ...f, [k]: e.target.value });
+
+  // Contact details live on the owner's profile and are shown on every ad
+  useEffect(() => {
+    let active = true;
+    api("/auth/me/").then(me => { if (active) { setPhone(current => current || me.phone || ""); setEmail(me.email || ""); } }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const previewUrls = imageFiles.map(file => URL.createObjectURL(file));
@@ -125,48 +146,66 @@ function CarForm({ car, onClose, onSaved }) {
 
   const submit = async e => {
     e.preventDefault(); setErr(""); setBusy(true);
-    const body = new FormData();
-    Object.entries({ make: f.make, model: f.model, year: +f.year, price_per_day: f.price_per_day, seats: +f.seats, transmission: f.transmission, fuel: f.fuel, location: fValue.collection_location, collection_location: fValue.collection_location, dropoff_location: fValue.dropoff_location, latitude: f.latitude ?? "", longitude: f.longitude ?? "", image_url: f.image_url, description: f.description, available: f.available }).forEach(([key, value]) => body.append(key, String(value)));
-    imageFiles.forEach(file => body.append("photos", file));
     try {
+      let { latitude, longitude } = f;
+      if (latitude == null || longitude == null) {
+        // The place was typed without picking a suggestion: try to find it so the car still lands on the map
+        const found = await locatePlace(f.location);
+        if (!found) throw new Error("We couldn't find that place on the map. Pick one of the suggestions under the location box.");
+        [latitude, longitude] = found;
+      }
+      const body = new FormData();
+      Object.entries({ make: f.make, model: f.model, year: +f.year, price_per_day: f.price_per_day, seats: +f.seats, transmission: f.transmission, fuel: f.fuel, location: f.location.trim(), latitude, longitude, image_url: f.image_url || "", description: f.description || "", contact_phone: phone.trim() }).forEach(([key, value]) => body.append(key, String(value)));
+      imageFiles.forEach(file => body.append("photos", file));
       await api(car ? `/cars/${car.id}/` : "/cars/", { method: car ? "PATCH" : "POST", body });
       onSaved();
     } catch (ex) { setErr(ex.message); }
     setBusy(false);
   };
 
+  const footer = <>
+    {err && <div className="err" role="alert">{err}</div>}
+    <button className="btn" type="submit" form="car-form" style={{ width: "100%" }} disabled={busy}>{busy ? "Saving…" : "Save car"}</button>
+  </>;
+
   return (
-    <Modal title={car ? "Edit car" : "Add a car"} onClose={onClose}>
-      <form onSubmit={submit}>
-        <div className="two">
-          <div><label>Make</label><input required value={f.make} onChange={set("make")} /></div>
-          <div><label>Model</label><input required value={f.model} onChange={set("model")} /></div>
-          <div><label>Year</label><input required type="number" value={f.year} onChange={set("year")} /></div>
-          <div><label>Price / day ({CURRENCY})</label><input required type="number" step="0.01" min="0" value={f.price_per_day} onChange={set("price_per_day")} /></div>
-          <div><label>Seats</label><input type="number" min="1" value={f.seats} onChange={set("seats")} /></div>
-          <div><label>Gearbox</label><select value={f.transmission} onChange={set("transmission")}><option value="manual">Manual</option><option value="auto">Automatic</option></select></div>
-          <div><label>Fuel</label><select value={f.fuel} onChange={set("fuel")}><option value="petrol">Petrol</option><option value="diesel">Diesel</option><option value="electric">Electric</option><option value="hybrid">Hybrid</option></select></div>
+    <Modal title={car ? "Edit car" : "Add a car"} onClose={onClose} className="car-form-modal" footer={footer}>
+      <form id="car-form" onSubmit={submit}>
+        <div className="form-grid">
+          <div><label htmlFor="car-make">Make</label><input id="car-make" required value={f.make} onChange={set("make")} /></div>
+          <div><label htmlFor="car-model">Model</label><input id="car-model" required value={f.model} onChange={set("model")} /></div>
+          <div><label htmlFor="car-year">Year</label><input id="car-year" required type="number" value={f.year} onChange={set("year")} /></div>
+          <div><label htmlFor="car-price">Price / day ({CURRENCY})</label><input id="car-price" required type="number" step="0.01" min="0" value={f.price_per_day} onChange={set("price_per_day")} /></div>
+          <div><label htmlFor="car-seats">Seats</label><input id="car-seats" type="number" min="1" value={f.seats} onChange={set("seats")} /></div>
+          <div><label htmlFor="car-gearbox">Gearbox</label><select id="car-gearbox" value={f.transmission} onChange={set("transmission")}><option value="manual">Manual</option><option value="auto">Automatic</option></select></div>
+          <div><label htmlFor="car-fuel">Fuel</label><select id="car-fuel" value={f.fuel} onChange={set("fuel")}><option value="petrol">Petrol</option><option value="diesel">Diesel</option><option value="electric">Electric</option><option value="hybrid">Hybrid</option></select></div>
         </div>
-        <div className="two location-fields">
-          <LocationInput id="collection-location" label="Collection location *" required value={fValue.collection_location} onChange={(value, coordinates) => setF({ ...f, collection_location: value, location: value, latitude: coordinates?.[0] ?? null, longitude: coordinates?.[1] ?? null })} />
-          <LocationInput id="dropoff-location" label="Drop-off location *" required value={fValue.dropoff_location} onChange={value => setF({ ...f, dropoff_location: value })} />
+
+        <h3 className="form-section">Where is the car?</h3>
+        <LocationInput id="car-location" label="Car location *" required value={f.location} placeholder="Town, suburb or address where the car is kept"
+          onChange={(value, coordinates) => setF(current => ({ ...current, location: value, latitude: coordinates?.[0] ?? null, longitude: coordinates?.[1] ?? null }))} />
+        <p className="field-hint">Pick a suggestion so the car shows in the right place on the map. Customers choose their own pick-up and drop-off places when they book.</p>
+
+        <h3 className="form-section">Your contact details <span>shown on this ad</span></h3>
+        <div className="form-grid two-up">
+          <div><label htmlFor="car-phone">Phone *</label><input id="car-phone" required type="tel" autoComplete="tel" placeholder="082 123 4567" value={phone} onChange={e => setPhone(e.target.value)} /></div>
+          <div><label htmlFor="car-email">Email (from your profile)</label><input id="car-email" type="email" value={email} placeholder="No email on your profile" disabled /></div>
         </div>
-        <label>Car photos <span className="sub">(up to {Math.max(0, 10 - oldPhotos.length)} more)</span></label>
+        <p className="field-hint">Signed-in customers see these on your ad. They are saved to your profile, so they apply to all your ads.</p>
+
+        <h3 className="form-section">Photos and description</h3>
         <div className="image-upload gallery-upload">
           <div className="photo-previews">{oldPhotos.map((photo, index) => <div className="photo-preview" key={`old-${index}`}><img src={photo} alt={`Current car photo ${index + 1}`} /></div>)}{newPreviews.map((photo, index) => <div className="photo-preview" key={`new-${index}`}><img src={photo} alt={`New car photo ${index + 1}`} /></div>)}{!oldPhotos.length && !newPreviews.length && <div className="photo-placeholder"><CarFront size={26} /></div>}</div>
-          <div className="image-upload-control"><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={e => {
+          <div className="image-upload-control"><input type="file" accept="image/jpeg,image/png,image/webp" multiple aria-label={`Add car photos, up to ${Math.max(0, 10 - oldPhotos.length)} more`} onChange={e => {
             const files = Array.from(e.target.files || []);
             const total = oldPhotos.length + files.length;
             if (total > 10) { setErr("A car can have up to 10 photos."); e.target.value = ""; return; }
             if (files.some(file => file.size > 8 * 1024 * 1024)) { setErr("Each photo must be 8 MB or smaller."); e.target.value = ""; return; }
             setErr(""); setImageFiles(files);
-          }} /><small>Select several JPG, PNG or WebP photos · max 8 MB each</small></div>
+          }} /><small>Up to {Math.max(0, 10 - oldPhotos.length)} more JPG, PNG or WebP photos · max 8 MB each</small></div>
         </div>
-        <label>Or use an image URL</label><input type="url" placeholder="https://…" value={f.image_url} onChange={set("image_url")} />
-        <label>Description</label><textarea rows="3" value={f.description} onChange={set("description")} />
-        <label style={{ display: "flex", gap: 8, alignItems: "center", color: "var(--text)" }}><input type="checkbox" style={{ width: "auto" }} checked={f.available} onChange={set("available")} /> Available for rent</label>
-        {err && <div className="err">{err}</div>}
-        <button className="btn" style={{ width: "100%", marginTop: 14 }} disabled={busy}>{busy ? "Saving…" : "Save car"}</button>
+        <label htmlFor="car-image-url">Or use an image URL</label><input id="car-image-url" type="url" placeholder="https://…" value={f.image_url} onChange={set("image_url")} />
+        <label htmlFor="car-description">Description</label><textarea id="car-description" rows="3" value={f.description} onChange={set("description")} />
       </form>
     </Modal>
   );
@@ -181,14 +220,26 @@ function Fleet({ onChange }) {
   const load = useCallback(async () => {
     try {
       const [mine, ownReports] = await Promise.all([api("/cars/mine/"), api("/problem-reports/")]);
-      setCars(mine); setReports(ownReports);
+      setCars(mine.filter(car => !car.is_archived)); setReports(ownReports);
     } catch (e) { setCars([]); toast(e.message, "err"); }
   }, []);
   useEffect(() => { load(); }, []);
 
+  const name = c => `${c.make} ${c.model}`;
   const del = async c => {
-    if (!confirm(`Delete ${c.make} ${c.model}? Its bookings will be deleted too.`)) return;
-    try { await api(`/cars/${c.id}/`, { method: "DELETE" }); toast("Car deleted"); load(); onChange(); } catch (e) { toast(e.message, "err"); }
+    if (!confirm(`Remove ${name(c)} from your fleet?\n\nIt leaves the discovery board and can't be booked again. Past bookings are kept.`)) return;
+    try { await api(`/cars/${c.id}/`, { method: "DELETE" }); toast("Car removed"); load(); onChange(); } catch (e) { toast(e.message, "err"); }
+  };
+  const pause = async c => {
+    if (!confirm(`Pause ${name(c)} for maintenance?\n\nIt will leave the discovery board and can't be booked until you resume it. Bookings you have already confirmed are not cancelled.`)) return;
+    try { await api(`/cars/${c.id}/pause/`, { method: "POST" }); toast(`${name(c)} is paused for maintenance`); load(); onChange(); } catch (e) { toast(e.message, "err"); }
+  };
+  const resume = async c => {
+    try {
+      const result = await api(`/cars/${c.id}/resume/`, { method: "POST" });
+      toast(result.status === "booked" ? `${name(c)} resumed. It stays off the board while booked until ${result.booked_until}` : `${name(c)} is back on the discovery board`);
+      load(); onChange();
+    } catch (e) { toast(e.message, "err"); }
   };
 
   return (
@@ -200,9 +251,20 @@ function Fleet({ onChange }) {
           <tbody>{cars.map(c => (
             <tr key={c.id}>
               <td><b>{c.year} {c.make} {c.model}</b></td><td>{money(c.price_per_day)}</td><td>{c.location || "—"}</td>
-              <td><StatusBadge status={c.available ? "confirmed" : "cancelled"} />{" "}{c.available ? "available" : "hidden"}</td>
+              <td>
+                <StatusBadge status={c.status || "active"} label={STATUS_LABEL[c.status] || STATUS_LABEL.active} />
+                {c.status === "booked" && <div className="sub status-note">until {c.booked_until}</div>}
+                {c.status === "paused" && <div className="sub status-note">Hidden from customers</div>}
+              </td>
               <td>{reports.find(report => report.car === c.id) ? <StatusBadge status={reports.find(report => report.car === c.id).status} /> : <span className="sub">None</span>}</td>
-              <td style={{ textAlign: "right" }}><button className="icon-button table-icon" title="Report a vehicle problem" aria-label={`Report a problem with ${c.make} ${c.model}`} onClick={() => setReportCar(c)}><Flag size={16} /></button>{" "}<button className="btn ghost sm" onClick={() => setEdit(c)}>Edit</button>{" "}<button className="btn bad sm" onClick={() => del(c)}>Delete</button></td>
+              <td><div className="fleet-actions">
+                {c.status === "paused"
+                  ? <button className="btn ok sm" onClick={() => resume(c)}><Play size={14} /> Resume</button>
+                  : <button className="btn ghost sm" onClick={() => pause(c)} title="Take this car off the discovery board while it is being serviced"><Wrench size={14} /> Pause for maintenance</button>}
+                <button className="icon-button table-icon" title="Report a vehicle problem" aria-label={`Report a problem with ${name(c)}`} onClick={() => setReportCar(c)}><Flag size={16} /></button>
+                <button className="btn ghost sm" onClick={() => setEdit(c)}>Edit</button>
+                <button className="btn bad sm" onClick={() => del(c)}>Delete</button>
+              </div></td>
             </tr>))}</tbody>
         </table></div>
       )}

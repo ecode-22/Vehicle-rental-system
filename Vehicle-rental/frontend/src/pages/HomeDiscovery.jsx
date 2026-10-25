@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LocateFixed, MapPin, MapPinned, Search } from "lucide-react";
 import { api } from "../services/api.js";
+import { clearPickupSearch, savePickupSearch } from "../services/pickup.js";
 import MapView from "../components/MapView.jsx";
 import LocationInput from "../components/LocationInput.jsx";
 import SkeletonLoader from "../components/SkeletonLoader.jsx";
@@ -65,12 +66,13 @@ export default function HomeDiscovery({ user, go, toast, locatePlace, currency =
     setLocating(false);
     if (!coordinates) return toast("We couldn't find that South African location. Try a nearby town or city.", "err");
     setOrigin(coordinates);
+    savePickupSearch(place.trim(), coordinates);
   };
   const useMyLocation = () => {
     if (!navigator.geolocation) return toast("Location services aren't available in this browser.", "err");
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      position => { setOrigin([position.coords.latitude, position.coords.longitude]); setPlace("Your current location"); setLocating(false); },
+      position => { setOrigin([position.coords.latitude, position.coords.longitude]); setPlace("Your current location"); clearPickupSearch(); setLocating(false); },
       () => { setLocating(false); toast("Location permission was unavailable. Enter a town or city instead.", "err"); },
       { enableHighAccuracy: false, timeout: 10000 }
     );
@@ -96,7 +98,7 @@ export default function HomeDiscovery({ user, go, toast, locatePlace, currency =
         <form className="location-search" onSubmit={searchPlace}>
           <label htmlFor="pickup-location"><MapPin size={17} /> Pickup location</label>
           <div className="location-controls">
-            <LocationInput id="pickup-location" value={place} placeholder="Town, suburb, airport or address" onChange={(value, coordinates) => { setPlace(value); if (coordinates) setOrigin(coordinates); }} />
+            <LocationInput id="pickup-location" value={place} placeholder="Town, suburb, airport or address" onChange={(value, coordinates) => { setPlace(value); if (coordinates) { setOrigin(coordinates); savePickupSearch(value, coordinates); } }} />
             <button className="icon-button" type="button" onClick={useMyLocation} disabled={locating} aria-label="Use my current location" title="Use my current location"><LocateFixed size={19} /></button>
             <button className="btn find-button" type="submit" disabled={locating || !place.trim()}><Search size={17} />{locating ? "Locating" : "Find cars"}</button>
           </div>
